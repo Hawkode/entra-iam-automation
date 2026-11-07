@@ -59,14 +59,17 @@ function Revoke-IamUserSession {
 }
 
 function Remove-IamUserLicense {
-    # Direct assignments only. Group-assigned licences go when the user leaves the group.
+    # Direct assignments only. Group-assigned licences go when the user leaves the group,
+    # and trying to remove them directly makes the whole call fail.
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$UserId)
-    $skuIds = @(Get-MgUserLicenseDetail -UserId $UserId -ErrorAction Stop | Select-Object -ExpandProperty SkuId)
-    if ($skuIds.Count -eq 0) { Write-IamLog -Message "No licences assigned: $UserId"; return }
-    if ($PSCmdlet.ShouldProcess($UserId, "Remove $($skuIds.Count) licence(s)")) {
+    $user = Get-MgUser -UserId $UserId -Property LicenseAssignmentStates -ErrorAction Stop
+    $skuIds = @($user.LicenseAssignmentStates | Where-Object { -not $_.AssignedByGroup } |
+        Select-Object -ExpandProperty SkuId -Unique)
+    if ($skuIds.Count -eq 0) { Write-IamLog -Message "No direct licences assigned: $UserId"; return }
+    if ($PSCmdlet.ShouldProcess($UserId, "Remove $($skuIds.Count) direct licence(s)")) {
         Set-MgUserLicense -UserId $UserId -AddLicenses @() -RemoveLicenses $skuIds -ErrorAction Stop | Out-Null
-        Write-IamLog -Message "Removed $($skuIds.Count) licence(s): $UserId"
+        Write-IamLog -Message "Removed $($skuIds.Count) direct licence(s): $UserId"
     }
 }
 
