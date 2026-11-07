@@ -1,0 +1,8 @@
+# Real tenant values, never commit
+config.local.psd1
+
+# Script output: logs and reports contain UPNs
+output/
+*.log
+*.csv
+!samples/*.csv
