@@ -48,7 +48,7 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation
 
 function ConvertTo-UpnPart {
     param([Parameter(Mandatory)][string]$Text)
-    # Strip accents (Ș -> S, ă -> a), then keep only a-z, 0-9 and hyphen.
+    # Strip accents (S-comma to S, a-breve to a), then keep only a-z, 0-9 and hyphen.
     $decomposed = $Text.Trim().Normalize([Text.NormalizationForm]::FormD)
     $plain = -join ($decomposed.ToCharArray() | Where-Object {
             [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne [Globalization.UnicodeCategory]::NonSpacingMark
