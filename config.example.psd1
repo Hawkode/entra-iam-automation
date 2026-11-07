@@ -6,6 +6,7 @@
     LicenseSkuPartNumber = 'ENTERPRISEPACK'   # find yours with: Get-MgSubscribedSku | Select SkuPartNumber
     StaleDays            = 90
     BreakGlassUpns       = @('breakglass@contoso.onmicrosoft.com')
+    AllowedDepartments   = @('HR', 'IT', 'Engineering', 'Customer Support', 'Warehouse', 'Finance')
     # Hybrid scripts only
     LeaversOU            = 'OU=Leavers,DC=lab,DC=local'
     EntraConnectServer   = 'SYNC01'
