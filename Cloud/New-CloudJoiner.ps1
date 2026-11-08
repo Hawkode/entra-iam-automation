@@ -9,7 +9,8 @@
     Department must match AllowedDepartments in config. The Dept- dynamic groups key
     on it, so a typo would leave the user licensed but with no group access.
 
-    UPN format: given.surname@DefaultDomain, lower case, accents removed.
+    UPN format: UpnFormat in config (default {given}.{surname}), lower case, accents
+    removed, @DefaultDomain. Tokens: {given}, {surname}, {g} (first initial), {s}.
     Every row is validated, and every UPN checked for collisions, before anything is
     created. If any row fails, nothing is created. Existing UPNs are not auto-numbered:
     a duplicate name needs a human decision.
@@ -72,9 +73,11 @@ function Get-RandomPassword {
     $pw
 }
 
-$cfg = Import-IamConfig
+$required = @('DefaultDomain', 'UsageLocation', 'AllowedDepartments')
+if (-not $SkipLicense) { $required += 'LicenseSkuPartNumber' }
+$cfg = Import-IamConfig -Require $required
 $allowed = @($cfg.AllowedDepartments)
-if ($allowed.Count -eq 0) { throw 'AllowedDepartments is missing from config.local.psd1.' }
+$upnFormat = if ($cfg.UpnFormat) { [string]$cfg.UpnFormat } else { '{given}.{surname}' }
 
 if ($PSCmdlet.ParameterSetName -eq 'Csv') {
     if (-not (Test-Path -Path $CsvPath)) { throw "CSV not found: $CsvPath" }
@@ -100,7 +103,12 @@ $plan = foreach ($r in $rows) {
     $first = ConvertTo-UpnPart -Text $gn
     $last = ConvertTo-UpnPart -Text $sn
     if (-not $first -or -not $last) { throw "Row ${i} ($gn $sn): name has no characters usable in a UPN." }
-    $nick = "$first.$last"
+    $nick = $upnFormat.Replace('{given}', $first).Replace('{surname}', $last)
+    $nick = $nick.Replace('{g}', $first.Substring(0, 1)).Replace('{s}', $last.Substring(0, 1))
+    if ($nick -match '[{}]') { throw "UpnFormat '$upnFormat' has an unknown token. Use {given}, {surname}, {g} or {s}." }
+    if ($nick -cnotmatch '^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$' -or $nick -match '\.\.') {
+        throw "Row ${i} ($gn $sn): UPN prefix '$nick' from UpnFormat '$upnFormat' is not valid."
+    }
 
     [pscustomobject]@{
         GivenName    = $gn
@@ -187,9 +195,7 @@ $results = foreach ($p in $plan) {
 
 $results = @($results)
 if ($results.Count -gt 0) {
-    $outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-    $csv = Join-Path -Path $outDir -ChildPath ('Joiners-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+    $csv = Get-IamOutputPath -Prefix 'Joiners'
     $results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv -NoTypeInformation
     Write-IamLog -Message "Joiners created: $($results.Count). CSV (no passwords): $csv"
 

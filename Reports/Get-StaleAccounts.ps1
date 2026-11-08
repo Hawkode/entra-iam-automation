@@ -36,7 +36,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-$cfg = Import-IamConfig
+$required = @('BreakGlassUpns')
+if (-not $PSBoundParameters.ContainsKey('StaleDays')) { $required += 'StaleDays' }
+$cfg = Import-IamConfig -Require $required
 if (-not $PSBoundParameters.ContainsKey('StaleDays')) { $StaleDays = $cfg.StaleDays }
 $now = (Get-Date).ToUniversalTime()
 $cutoff = $now.AddDays(-$StaleDays)
@@ -91,9 +93,7 @@ $report = foreach ($u in $users) {
 
 $report = @($report | Sort-Object -Property @{ Expression = { $_.Finding -in 'Stale', 'Never signed in' }; Descending = $true }, DisplayName)
 
-$outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-$csv = Join-Path -Path $outDir -ChildPath ('StaleAccounts-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+$csv = Get-IamOutputPath -Prefix 'StaleAccounts'
 $report | Export-Csv -Path $csv -NoTypeInformation
 
 $stale = @($report | Where-Object { $_.Finding -in 'Stale', 'Never signed in' }).Count

@@ -46,7 +46,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-$cfg = Import-IamConfig
+$cfg = Import-IamConfig -Require BreakGlassUpns
 if (@($cfg.BreakGlassUpns) -contains $UserPrincipalName) {
     throw "$UserPrincipalName is a break-glass account. The leaver script will not touch it."
 }
@@ -134,9 +134,7 @@ if ($user.Department) {
     }
 }
 
-$outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-$csv = Join-Path -Path $outDir -ChildPath ('Leaver-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+$csv = Get-IamOutputPath -Prefix 'Leaver'
 [pscustomobject]@{
     Upn            = $UserPrincipalName
     Disabled       = $true

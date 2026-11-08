@@ -7,6 +7,11 @@
     tags each with a risk tier, and for Critical/High rows checks whether the
     app has a credential (secret or certificate) that could be stolen.
 
+    Tenant-wide delegated grants (consented for all users) are always shown,
+    whatever their tier, because the grant itself is a finding. The standard
+    sign-in scopes (openid, profile, email, offline_access, User.Read) are the
+    only exception: almost every app that uses Entra sign-in has them.
+
     Read-only. Graph scopes (delegated): Application.Read.All, DelegatedPermissionGrant.Read.All
 
 .PARAMETER MinimumRisk
@@ -39,6 +44,7 @@ $tiers = @{
         'Sites.Read.All', 'AuditLog.Read.All')
 }
 $rank = @{ Low = 0; Medium = 1; High = 2; Critical = 3 }
+$signInScopes = @('openid', 'profile', 'email', 'offline_access', 'User.Read')
 
 function Get-PermissionRisk {
     param([string]$Permission)
@@ -105,7 +111,10 @@ foreach ($d in $delegated) {
     }
 }
 
-$report = @($results | Where-Object { $rank[$_.Risk] -ge $rank[$MinimumRisk] } |
+$report = @($results | Where-Object {
+        $rank[$_.Risk] -ge $rank[$MinimumRisk] -or
+        ($_.Type -eq 'Delegated (all users)' -and $signInScopes -notcontains $_.Permission)
+    } |
         Sort-Object -Property @{ Expression = { $rank[$_.Risk] }; Descending = $true }, App, Permission)
 
 foreach ($row in $report | Where-Object { $_.Risk -in 'Critical', 'High' }) {
@@ -115,9 +124,12 @@ foreach ($row in $report | Where-Object { $_.Risk -in 'Critical', 'High' }) {
     }
 }
 
-$outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-$csv = Join-Path -Path $outDir -ChildPath ('RiskyAppPermissions-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+$tenantWide = @($report | Where-Object { $_.Type -eq 'Delegated (all users)' -and $signInScopes -notcontains $_.Permission })
+foreach ($app in ($tenantWide | Group-Object -Property App)) {
+    Write-IamLog -Level WARN -Message "$($app.Name) has tenant-wide consent (all users) for: $($app.Group.Permission -join ', '). Check it was approved."
+}
+
+$csv = Get-IamOutputPath -Prefix 'RiskyAppPermissions'
 $report | Export-Csv -Path $csv -NoTypeInformation
 
 $crit = @($report | Where-Object Risk -EQ 'Critical').Count

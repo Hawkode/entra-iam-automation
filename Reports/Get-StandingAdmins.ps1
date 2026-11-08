@@ -23,7 +23,7 @@ param([switch]$PrivilegedOnly)
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-$cfg = Import-IamConfig
+$cfg = Import-IamConfig -Require BreakGlassUpns
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'RoleManagement.Read.Directory', 'Directory.Read.All'
 
 $breakGlass = @($cfg.BreakGlassUpns)
@@ -115,9 +115,7 @@ foreach ($f in $report | Where-Object Finding -EQ 'Standing privileged access') 
     Write-IamLog -Level WARN -Message "Standing privileged access: $($f.Principal) holds $($f.Role) permanently."
 }
 
-$outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-$csv = Join-Path -Path $outDir -ChildPath ('StandingAdmins-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+$csv = Get-IamOutputPath -Prefix 'StandingAdmins'
 $report | Export-Csv -Path $csv -NoTypeInformation
 
 $standing = @($report | Where-Object Finding -EQ 'Standing privileged access').Count

@@ -32,9 +32,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-$cfg = Import-IamConfig
+$cfg = Import-IamConfig -Require AllowedDepartments
 $allowed = @($cfg.AllowedDepartments)
-if ($allowed.Count -eq 0) { throw 'AllowedDepartments is missing from config.local.psd1.' }
 $newDept = $allowed | Where-Object { $_ -eq $Department.Trim() } | Select-Object -First 1
 if (-not $newDept) { throw "Department '$Department' is not allowed. Allowed: $($allowed -join ', ')" }
 
@@ -82,9 +81,7 @@ if ($review.Count -gt 0) {
     $summary = ($review | ForEach-Object { "$($_.Type): $($_.Name)" }) -join '; '
     Write-IamLog -Level WARN -Message "$($review.Count) item(s) do not follow the move for ${UserPrincipalName}. Review with the new manager: $summary"
 
-    $outDir = Join-Path -Path $PSScriptRoot -ChildPath '..\output'
-    New-Item -ItemType Directory -Path $outDir -Force -WhatIf:$false | Out-Null
-    $csv = Join-Path -Path $outDir -ChildPath ('MoverReview-{0:yyyyMMdd-HHmm}.csv' -f (Get-Date))
+    $csv = Get-IamOutputPath -Prefix 'MoverReview'
     $review | Select-Object @{ n = 'Upn'; e = { $UserPrincipalName } }, @{ n = 'From'; e = { $oldDept } },
     @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -NoTypeInformation -WhatIf:$false
     Write-IamLog -Message "Review list: $csv"

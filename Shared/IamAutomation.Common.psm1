@@ -10,19 +10,58 @@ function Write-IamLog {
         [ValidateSet('INFO', 'WARN', 'ERROR')][string]$Level = 'INFO'
     )
     $outDir = Join-Path -Path $script:RepoRoot -ChildPath 'output'
-    if (-not (Test-Path -Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force | Out-Null }
+    if (-not (Test-Path -Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force -WhatIf:$false | Out-Null }
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $Message
-    Add-Content -Path (Join-Path -Path $outDir -ChildPath 'iam-automation.log') -Value $line
+    Add-Content -Path (Join-Path -Path $outDir -ChildPath 'iam-automation.log') -Value $line -WhatIf:$false
     Write-Information -MessageData $line -InformationAction Continue
 }
 
 function Import-IamConfig {
+    <#
+    .SYNOPSIS
+        Loads config.local.psd1 and stops early if it is not filled in.
+    .DESCRIPTION
+        Always checks TenantId. Each script passes the other keys it needs with -Require.
+        A required key fails if it is missing, empty, or still holds an example value
+        (anything containing "contoso"), so a half-edited copy of config.example.psd1
+        never reaches a tenant.
+    #>
     [CmdletBinding()]
-    param([string]$Path = (Join-Path -Path $script:RepoRoot -ChildPath 'config.local.psd1'))
+    param(
+        [string[]]$Require = @(),
+        [string]$Path = (Join-Path -Path $script:RepoRoot -ChildPath 'config.local.psd1')
+    )
     if (-not (Test-Path -Path $Path)) {
         throw "Config not found: $Path. Copy config.example.psd1 to config.local.psd1 and fill it in."
     }
-    Import-PowerShellDataFile -Path $Path
+    $cfg = Import-PowerShellDataFile -Path $Path
+
+    $problems = @()
+    $tenant = [guid]::Empty
+    if (-not [guid]::TryParse("$($cfg.TenantId)", [ref]$tenant) -or $tenant -eq [guid]::Empty) {
+        $problems += 'TenantId must be your tenant ID (Entra admin center > Overview > Tenant ID).'
+    }
+    foreach ($key in $Require) {
+        $values = @($cfg[$key] | Where-Object { "$_".Trim() })
+        if (-not $cfg.ContainsKey($key) -or $values.Count -eq 0) { $problems += "$key is missing or empty." }
+        elseif ("$values" -match 'contoso') { $problems += "$key still has the example value from config.example.psd1." }
+    }
+    if ($problems.Count) {
+        throw ("config.local.psd1 is not ready:`n - " + ($problems -join "`n - "))
+    }
+    $cfg
+}
+
+function Get-IamOutputPath {
+    <#
+    .SYNOPSIS
+        Returns a timestamped CSV path in the repo's output folder (gitignored) and creates the folder.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Prefix)
+    $outDir = Join-Path -Path $script:RepoRoot -ChildPath 'output'
+    if (-not (Test-Path -Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force -WhatIf:$false | Out-Null }
+    Join-Path -Path $outDir -ChildPath ('{0}-{1:yyyyMMdd-HHmmss}.csv' -f $Prefix, (Get-Date))
 }
 
 function Connect-IamGraph {
@@ -73,4 +112,5 @@ function Remove-IamUserLicense {
     }
 }
 
-Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Connect-IamGraph, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense
+Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Connect-IamGraph, Assert-IamSyncState,
+    Revoke-IamUserSession, Remove-IamUserLicense
