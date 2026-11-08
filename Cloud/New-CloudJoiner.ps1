@@ -47,32 +47,6 @@ param(
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-function ConvertTo-UpnPart {
-    param([Parameter(Mandatory)][string]$Text)
-    # Strip accents (S-comma to S, a-breve to a), then keep only a-z, 0-9 and hyphen.
-    $decomposed = $Text.Trim().Normalize([Text.NormalizationForm]::FormD)
-    $plain = -join ($decomposed.ToCharArray() | Where-Object {
-            [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne [Globalization.UnicodeCategory]::NonSpacingMark
-        })
-    $plain.ToLowerInvariant() -replace '[^a-z0-9-]', ''
-}
-
-function Get-RandomPassword {
-    param([int]$Length = 20)
-    # No I, O, l, o, 0, 1: avoids misreads when the password is passed on.
-    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#%*+-=?@'.ToCharArray()
-    $bytes = New-Object -TypeName byte[] -ArgumentList $Length
-    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        do {
-            $rng.GetBytes($bytes)
-            $pw = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
-        } until ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]' -and $pw -match '[^A-Za-z0-9]')
-    }
-    finally { $rng.Dispose() }
-    $pw
-}
-
 $required = @('DefaultDomain', 'UsageLocation', 'AllowedDepartments')
 if (-not $SkipLicense) { $required += 'LicenseSkuPartNumber' }
 $cfg = Import-IamConfig -Require $required
@@ -100,15 +74,8 @@ $plan = foreach ($r in $rows) {
     $dept = $allowed | Where-Object { $_ -eq $deptIn } | Select-Object -First 1
     if (-not $dept) { throw "Row ${i} ($gn $sn): department '$deptIn' is not allowed. Allowed: $($allowed -join ', ')" }
 
-    $first = ConvertTo-UpnPart -Text $gn
-    $last = ConvertTo-UpnPart -Text $sn
-    if (-not $first -or -not $last) { throw "Row ${i} ($gn $sn): name has no characters usable in a UPN." }
-    $nick = $upnFormat.Replace('{given}', $first).Replace('{surname}', $last)
-    $nick = $nick.Replace('{g}', $first.Substring(0, 1)).Replace('{s}', $last.Substring(0, 1))
-    if ($nick -match '[{}]') { throw "UpnFormat '$upnFormat' has an unknown token. Use {given}, {surname}, {g} or {s}." }
-    if ($nick -cnotmatch '^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$' -or $nick -match '\.\.') {
-        throw "Row ${i} ($gn $sn): UPN prefix '$nick' from UpnFormat '$upnFormat' is not valid."
-    }
+    try { $nick = Get-IamUpnPrefix -GivenName $gn -Surname $sn -Format $upnFormat }
+    catch { throw "Row ${i} ($gn $sn): $($_.Exception.Message)" }
 
     [pscustomobject]@{
         GivenName    = $gn
@@ -148,7 +115,7 @@ $results = foreach ($p in $plan) {
     if ($skuId) { $action += " and assign $($cfg.LicenseSkuPartNumber)" }
     if (-not $PSCmdlet.ShouldProcess($p.Upn, $action)) { continue }
 
-    $password = Get-RandomPassword
+    $password = Get-IamRandomPassword
     $body = @{
         AccountEnabled    = $true
         DisplayName       = $p.DisplayName

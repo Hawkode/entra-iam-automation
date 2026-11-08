@@ -28,7 +28,23 @@
     # Exact department names your dynamic groups key on. Joiner and mover reject anything else.
     AllowedDepartments   = @('HR', 'IT', 'Engineering', 'Customer Support', 'Warehouse', 'Finance')
 
-    # Hybrid scripts only.
-    LeaversOU            = 'OU=Leavers,DC=lab,DC=local'
-    EntraConnectServer   = 'SYNC01'
+    # ---- Hybrid scripts only ----
+
+    # Department name -> OU where its users live. The keys are the allowed departments
+    # for the hybrid joiner and mover, so match them to your dynamic group rules.
+    DepartmentOUs        = @{
+        'HR'      = 'OU=HR,OU=Users,DC=contoso,DC=local'
+        'Finance' = 'OU=Finance,OU=Users,DC=contoso,DC=local'
+    }
+
+    # Where the hybrid leaver moves disabled accounts. Check whether this OU is inside the
+    # Entra Connect sync scope: if it is not, the sync deletes the cloud account and
+    # soft-deletes its mailbox.
+    LeaversOU            = 'OU=Leavers,DC=contoso,DC=local'
+
+    # Active Entra Connect server (not a staging server). Needs WinRM and ADSyncOperators.
+    EntraConnectServer   = 'SYNC01.contoso.local'
+
+    # AD groups the hybrid leaver never removes, and the hybrid mover does not list.
+    ProtectedAdGroups    = @('Domain Users')
 }

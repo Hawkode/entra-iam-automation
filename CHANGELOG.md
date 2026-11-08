@@ -2,10 +2,20 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-11-08
+
+### Added
+- Hybrid lifecycle: `New-HybridJoiner`, `Move-HybridUser`, `Disable-HybridLeaver` (AD first, then Entra Connect delta sync, then Graph).
+- Config keys `DepartmentOUs`, `ProtectedAdGroups`. `LeaversOU` and `EntraConnectServer` are now used.
+- Shared module: `Get-IamUpnPrefix`, `Get-IamRandomPassword`, `ConvertTo-IamSecureString`, `Import-IamAdModule`, `Invoke-IamDeltaSync`, `Wait-IamCloudUser`.
+- Dependabot keeps the GitHub Actions in the lint workflow up to date.
+- README: hybrid section with requirements and the Leavers OU sync scope check.
 
 ### Changed
-- README: install from a tagged release, a note for hybrid tenants, a "Before you run it in production" checklist, and the hybrid joiner back in the plan.
+- `New-CloudJoiner` uses the shared UPN and password helpers, so both joiners build UPNs the same way.
+- Lint workflow: 10-minute job timeout, and PSScriptAnalyzer pinned to 1.23.0 so a runner image update cannot change or hang the results.
+- Config check handles hashtable values (`DepartmentOUs`), including example values.
+- README: install from a tagged release, a note for hybrid tenants, a "Before you run it in production" checklist.
 
 ## [1.0.0] - 2026-11-08
 

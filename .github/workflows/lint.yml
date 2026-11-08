@@ -8,6 +8,8 @@ permissions:
 jobs:
   psscriptanalyzer:
     runs-on: ubuntu-latest
+    # A healthy run takes about a minute. Stop a hung run instead of waiting for the 6-hour default.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -15,10 +17,11 @@ jobs:
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
-          # The runner image ships with PSScriptAnalyzer. Install only if it is missing.
-          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-            Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
-          }
+          # Pin the analyzer version so results do not change when the runner image updates.
+          $version = '1.23.0'
+          Install-Module PSScriptAnalyzer -RequiredVersion $version -Force -Scope CurrentUser
+          Import-Module PSScriptAnalyzer -RequiredVersion $version -Force
+          Write-Output "PowerShell $($PSVersionTable.PSVersion), PSScriptAnalyzer $version"
           $r = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning, Error -ExcludeRule PSMissingModuleManifestField
           $r | Format-Table -AutoSize
           if ($r) { exit 1 }

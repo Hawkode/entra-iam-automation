@@ -10,7 +10,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | Folder | Contents |
 |---|---|
 | `Cloud/` | Joiner, mover, leaver for cloud-only users |
-| `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (planned for v1.1.0) |
+| `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
@@ -23,9 +23,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.0.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
+1. Get the latest tagged release, not `main`. Replace `v1.1.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
    ```powershell
-   git clone --branch v1.0.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.1.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
@@ -35,7 +35,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
    ```
 4. Run lifecycle scripts with `-WhatIf`, then for real on a test user, then in normal use.
 
-**Hybrid tenants (users synced from AD DS):** the `Cloud/` lifecycle scripts refuse synced users by design, so in a hybrid tenant only the reports are usable until the `Hybrid/` scripts are released. Use the Cloud scripts only for cloud-only accounts.
+**Hybrid tenants (users synced from AD DS):** use the `Hybrid/` lifecycle scripts. The `Cloud/` scripts refuse synced users by design, and the `Hybrid/` scripts refuse cloud-only users. See [Hybrid lifecycle](#hybrid-lifecycle) for the extra requirements.
 
 **Consent:** the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user in the tenant. Scripts use delegated sign-in only: no app registrations, no secrets.
 
@@ -62,7 +62,10 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `StaleDays` | Stale accounts | Days without sign-in before an account is flagged |
 | `BreakGlassUpns` | Leaver, reports | Emergency access accounts. Reports mark them as expected, the leaver refuses to touch them |
 | `AllowedDepartments` | Joiner, mover | Exact department names your dynamic groups key on |
-| `LeaversOU`, `EntraConnectServer` | Hybrid | Used by the hybrid scripts (planned for v1.1.0) |
+| `DepartmentOUs` | Hybrid joiner, mover | Department name to OU. The keys are the allowed departments in hybrid scripts |
+| `LeaversOU` | Hybrid leaver | OU for disabled leavers. Check its sync scope first (see below) |
+| `EntraConnectServer` | Hybrid | Active Entra Connect server (not staging) |
+| `ProtectedAdGroups` | Hybrid leaver, mover | AD groups never removed or listed. Default `Domain Users` |
 
 ## Cloud lifecycle
 | Script | Does | Graph scopes |
@@ -71,13 +74,35 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Move-CloudUser.ps1` | Changes department so dynamic groups re-scope access, lists assigned groups and roles that do not move | `User.ReadWrite.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` |
 | `Disable-CloudLeaver.ps1` | Disables, revokes sessions, removes assigned groups and direct licences, clears department | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
 
+## Hybrid lifecycle
+| Script | Does | Graph scopes |
+|---|---|---|
+| `New-HybridJoiner.ps1` | Creates the user in AD in the department's OU, runs a delta sync, waits for the user in Entra ID, sets usage location and assigns the licence. `-ResumeUserPrincipalName` finishes the cloud steps later if the sync is slow | `User.ReadWrite.All`, `LicenseAssignment.Read.All` |
+| `Move-HybridUser.ps1` | Changes department and title in AD, moves the account to the new department's OU, syncs. Lists AD groups, cloud-only groups and roles that do not move | `User.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` (read-only) |
+| `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+
+### Requirements
+- RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
+- An on-prem account with delegated rights on the OUs in `DepartmentOUs` and `LeaversOU`: create, edit, move, disable and reset password on users, and remove members from their groups. Not Domain Admin.
+- WinRM to `EntraConnectServer`, and membership of `ADSyncOperators` (or local admin) on it.
+- `DefaultDomain` must be a UPN suffix in AD (AD Domains and Trusts) and a verified domain in Entra ID. The joiner checks the AD side.
+
+### Check the Leavers OU sync scope first
+On the Entra Connect server: Microsoft Entra Connect > **Configure** > **Customize synchronization options** > **Domain and OU filtering**. Read the setting, then **Cancel**.
+- **Leavers OU inside the scope:** the cloud account stays, disabled. The leaver revokes sessions and removes licences.
+- **Leavers OU outside the scope:** the sync **deletes** the cloud account (Deleted users, 30 days) and **soft-deletes its mailbox**. The leaver detects this and skips the cloud steps. Convert the mailbox to shared **before** running the leaver if it has to be kept.
+
+The same applies to the mover: if a department OU is outside the scope, moving a user into it deletes their cloud account. The mover checks after the sync and reports it.
+
 ### Safety controls
 - **Config check:** every script validates the config values it needs before signing in.
-- **Sync guard:** Cloud scripts stop on users synced from AD. Hybrid scripts will stop on cloud-only users.
+- **Sync guard:** Cloud scripts stop on users synced from AD. Hybrid scripts stop on cloud-only users.
+- **Soft-match guard:** the hybrid joiner stops if the UPN already exists in Entra ID, because Entra Connect would match the new AD account onto that cloud account and take it over.
 - **Department allowlist:** departments must match `AllowedDepartments`, so a typo cannot create a user outside every dynamic group.
 - **Validate first:** the joiner checks every row and every UPN before creating anything. One bad row, nothing created.
 - **`-WhatIf`** on every script that changes something.
-- **Leaver:** lists the full plan, then asks for confirmation once. Refuses to run on break-glass accounts or on the signed-in admin.
+- **Leavers:** list the full plan, then ask for confirmation once. Refuse break-glass accounts and the signed-in admin. The hybrid leaver also refuses AD protected accounts (`adminCount = 1`, members of Domain Admins and similar), which need a Tier 0 admin.
+- **Hybrid leaver order:** sessions are revoked only after Entra ID shows the account as disabled. Before that, with password hash sync, the old password still works in the cloud.
 - **Not automated on purpose:** removing directory roles (would need `RoleManagement.ReadWrite.Directory`). Reported for manual action instead.
 - **Temporary passwords** are shown once in the console and never logged or written to CSV.
 
@@ -93,6 +118,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 
 ## Known limitations
 - The leaver does not handle mailboxes (convert to shared **before** removing an Exchange licence), OneDrive handover, devices, MFA methods or shared credentials. Keep those in your offboarding checklist.
+- The hybrid joiner does not provision mailboxes through on-prem Exchange (`Enable-RemoteMailbox`). It fits tenants where Exchange Online creates the mailbox when the licence is assigned.
 - The joiner assigns one licence SKU per run. For per-department licences, use group-based licensing and `-SkipLicense`.
 - `signInActivity` can lag real sign-ins by a few hours. Fine for 30 or 90-day thresholds, not live data.
 - Graph PowerShell on Windows signs in through WAM, which caches tokens. After a consent grant is revoked, the cached token keeps its old scopes until it expires (about an hour).
@@ -107,7 +133,9 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user and CSV) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested |
-| Hybrid/ joiner, mover, leaver | Planned for v1.1.0 |
+| Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
+| Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 
 ## Versioning
 Changes are listed in [CHANGELOG.md](CHANGELOG.md). Use a tagged release, not whatever is on `main` that day, and test it before you rely on it.

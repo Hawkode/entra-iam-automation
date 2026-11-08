@@ -1,0 +1,121 @@
+<#
+.SYNOPSIS
+    Moves a synced user to a new department in AD and lists access that does not move with them.
+
+.DESCRIPTION
+    For hybrid tenants where AD DS is the source of authority and each department has its own OU.
+
+      1. Changes department (and optionally job title) in AD.
+      2. Moves the account to the new department's OU (DepartmentOUs).
+      3. Runs an Entra Connect delta sync. The department syncs to Entra ID and the
+         Dept- dynamic groups re-scope cloud access.
+      4. Checks the user still exists in Entra ID. If the new OU is outside the sync
+         scope, the sync deletes the cloud account: the script reports it so you can
+         restore it from Deleted users.
+
+    Review list (removes nothing): on-prem AD group memberships, cloud-only assigned
+    groups and active directory roles. In a hybrid tenant the AD groups (file shares,
+    VPN, apps) are usually the bigger leftover risk, and no dynamic group touches them.
+    The review is read-only, so it runs and writes its CSV under -WhatIf too.
+
+    Graph scopes (delegated, read-only): User.Read.All, GroupMember.Read.All, RoleManagement.Read.Directory
+    AD rights: write department and title, move users between the DepartmentOUs.
+    Entra Connect server: WinRM and ADSyncOperators.
+
+.EXAMPLE
+    .\Hybrid\Move-HybridUser.ps1 -UserPrincipalName sofia.novak@contoso.com -Department HR -WhatIf
+.EXAMPLE
+    .\Hybrid\Move-HybridUser.ps1 -UserPrincipalName sofia.novak@contoso.com -Department HR -JobTitle 'HR Assistant'
+#>
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory)][string]$UserPrincipalName,
+    [Parameter(Mandatory)][string]$Department,
+    [string]$JobTitle,
+    [int]$SyncTimeoutSeconds = 600
+)
+
+$ErrorActionPreference = 'Stop'
+Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
+
+$cfg = Import-IamConfig -Require DepartmentOUs, EntraConnectServer
+$deptOUs = $cfg.DepartmentOUs
+$protected = if ($cfg.ProtectedAdGroups) { @($cfg.ProtectedAdGroups) } else { @('Domain Users') }
+
+$newDept = $deptOUs.Keys | Where-Object { $_ -eq $Department.Trim() } | Select-Object -First 1
+if (-not $newDept) { throw "Department '$Department' is not in DepartmentOUs. Allowed: $(($deptOUs.Keys | Sort-Object) -join ', ')" }
+$newOU = $deptOUs[$newDept]
+
+Import-IamAdModule
+$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Title, MemberOf, Enabled
+if (-not $ad) { throw "$UserPrincipalName not found in AD." }
+if (-not $ad.Enabled) { throw "$UserPrincipalName is disabled in AD. Movers apply to active users only." }
+try { $null = Get-ADOrganizationalUnit -Identity $newOU }
+catch { throw "OU for $newDept not found: $newOU" }
+
+Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.Read.All', 'GroupMember.Read.All', 'RoleManagement.Read.Directory'
+$cloud = Assert-IamSyncState -UserPrincipalName $UserPrincipalName -Expected Hybrid
+
+$oldDept = $ad.Department
+$oldOU = ($ad.DistinguishedName -split '(?<!\\),', 2)[1]
+$newTitle = if ($JobTitle) { $JobTitle.Trim() } else { $null }
+$moveOU = $oldOU -ne $newOU
+if ($oldDept -ceq $newDept -and -not $moveOU -and (-not $newTitle -or $newTitle -ceq $ad.Title)) {
+    Write-IamLog -Message "$UserPrincipalName is already in $newDept ($newOU). Nothing to change."
+    return
+}
+
+# Access that does not follow the department.
+$review = @()
+foreach ($dn in @($ad.MemberOf)) {
+    $g = Get-ADGroup -Identity $dn
+    if ($protected -contains $g.Name) { continue }
+    $review += [pscustomobject]@{ Type = 'AD group'; Name = $g.Name; Id = $dn }
+}
+foreach ($m in (Get-MgUserMemberOf -UserId $cloud.Id -All)) {
+    $props = $m.AdditionalProperties
+    if ($props.'@odata.type' -ne '#microsoft.graph.group') { continue }
+    if (@($props.groupTypes) -contains 'DynamicMembership') { continue }
+    if ($props.onPremisesSyncEnabled -eq $true) { continue }   # synced AD groups are listed above
+    $review += [pscustomobject]@{ Type = 'Cloud assigned group'; Name = $props.displayName; Id = $m.Id }
+}
+foreach ($a in (Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId eq '$($cloud.Id)'" -All)) {
+    $role = Get-MgRoleManagementDirectoryRoleDefinition -UnifiedRoleDefinitionId $a.RoleDefinitionId
+    $review += [pscustomobject]@{ Type = 'Directory role (active)'; Name = $role.DisplayName; Id = $a.Id }
+}
+
+$what = "Department '$oldDept' -> '$newDept'"
+if ($newTitle) { $what += ", job title '$($ad.Title)' -> '$newTitle'" }
+if ($moveOU) { $what += ", move to $newOU" }
+$what += ', delta sync'
+
+if ($PSCmdlet.ShouldProcess($UserPrincipalName, $what)) {
+    $set = @{ Identity = $ad.ObjectGUID; Department = $newDept }
+    if ($newTitle) { $set.Title = $newTitle }
+    Set-ADUser @set
+    if ($moveOU) { Move-ADObject -Identity $ad.ObjectGUID -TargetPath $newOU }
+    Write-IamLog -Message "Moved $UserPrincipalName in AD. $what"
+
+    $null = Invoke-IamDeltaSync -Server $cfg.EntraConnectServer -TimeoutSeconds $SyncTimeoutSeconds
+    $after = Wait-IamCloudUser -UserId $cloud.Id -TimeoutSeconds 60
+    if ($after -eq 'Deleted') {
+        Write-IamLog -Level ERROR -Message ("$UserPrincipalName no longer exists in Entra ID: $newOU is outside the sync scope. " +
+            'Move the account back to a synced OU and run a delta sync, or restore it from Deleted users.')
+    }
+    else {
+        Write-IamLog -Message "$UserPrincipalName synced. Dynamic groups update within minutes."
+    }
+}
+
+if ($review.Count -gt 0) {
+    $summary = ($review | ForEach-Object { "$($_.Type): $($_.Name)" }) -join '; '
+    Write-IamLog -Level WARN -Message "$($review.Count) item(s) do not follow the move for ${UserPrincipalName}. Review with the new manager: $summary"
+    $csv = Get-IamOutputPath -Prefix 'HybridMoverReview'
+    $review | Select-Object @{ n = 'Upn'; e = { $UserPrincipalName } }, @{ n = 'From'; e = { $oldDept } },
+    @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -NoTypeInformation -WhatIf:$false
+    Write-IamLog -Message "Review list: $csv"
+    $review | Format-Table Type, Name -AutoSize
+}
+else {
+    Write-IamLog -Message "No AD groups, cloud assigned groups or active roles on $UserPrincipalName."
+}

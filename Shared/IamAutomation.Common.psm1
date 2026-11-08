@@ -42,7 +42,9 @@ function Import-IamConfig {
         $problems += 'TenantId must be your tenant ID (Entra admin center > Overview > Tenant ID).'
     }
     foreach ($key in $Require) {
-        $values = @($cfg[$key] | Where-Object { "$_".Trim() })
+        $raw = $cfg[$key]
+        if ($raw -is [System.Collections.IDictionary]) { $raw = @($raw.Values) }
+        $values = @($raw | Where-Object { "$_".Trim() })
         if (-not $cfg.ContainsKey($key) -or $values.Count -eq 0) { $problems += "$key is missing or empty." }
         elseif ("$values" -match 'contoso') { $problems += "$key still has the example value from config.example.psd1." }
     }
@@ -62,6 +64,155 @@ function Get-IamOutputPath {
     $outDir = Join-Path -Path $script:RepoRoot -ChildPath 'output'
     if (-not (Test-Path -Path $outDir)) { New-Item -ItemType Directory -Path $outDir -Force -WhatIf:$false | Out-Null }
     Join-Path -Path $outDir -ChildPath ('{0}-{1:yyyyMMdd-HHmmss}.csv' -f $Prefix, (Get-Date))
+}
+
+function ConvertTo-IamUpnPart {
+    # Strip accents (S-comma to S, a-breve to a), then keep only a-z, 0-9 and hyphen.
+    param([Parameter(Mandatory)][string]$Text)
+    $decomposed = $Text.Trim().Normalize([Text.NormalizationForm]::FormD)
+    $plain = -join ($decomposed.ToCharArray() | Where-Object {
+            [Globalization.CharUnicodeInfo]::GetUnicodeCategory($_) -ne [Globalization.UnicodeCategory]::NonSpacingMark
+        })
+    $plain.ToLowerInvariant() -replace '[^a-z0-9-]', ''
+}
+
+function Get-IamUpnPrefix {
+    <#
+    .SYNOPSIS
+        Builds the UPN prefix (the part before @) from a name and the UpnFormat config value.
+    .DESCRIPTION
+        Tokens: {given}, {surname}, {g} (first initial), {s}. Accents are removed and the
+        result is lower case. Throws on unknown tokens or a result that is not a valid prefix.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$GivenName,
+        [Parameter(Mandatory)][string]$Surname,
+        [string]$Format = '{given}.{surname}'
+    )
+    $first = ConvertTo-IamUpnPart -Text $GivenName
+    $last = ConvertTo-IamUpnPart -Text $Surname
+    if (-not $first -or -not $last) { throw "'$GivenName $Surname' has no characters usable in a UPN." }
+    $nick = $Format.Replace('{given}', $first).Replace('{surname}', $last)
+    $nick = $nick.Replace('{g}', $first.Substring(0, 1)).Replace('{s}', $last.Substring(0, 1))
+    if ($nick -match '[{}]') { throw "UpnFormat '$Format' has an unknown token. Use {given}, {surname}, {g} or {s}." }
+    if ($nick -cnotmatch '^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$' -or $nick -match '\.\.') {
+        throw "UPN prefix '$nick' from UpnFormat '$Format' is not valid."
+    }
+    $nick
+}
+
+function Get-IamRandomPassword {
+    <#
+    .SYNOPSIS
+        Random password from a cryptographic RNG, with upper, lower, digit and symbol.
+        No I, O, l, o, 0, 1, so it survives being read out or retyped.
+    #>
+    [CmdletBinding()]
+    param([ValidateRange(14, 128)][int]$Length = 20)
+    $chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!#%*+-=?@'.ToCharArray()
+    $bytes = New-Object -TypeName byte[] -ArgumentList $Length
+    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        do {
+            $rng.GetBytes($bytes)
+            $pw = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+        } until ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]' -and $pw -match '[^A-Za-z0-9]')
+    }
+    finally { $rng.Dispose() }
+    $pw
+}
+
+function ConvertTo-IamSecureString {
+    # Builds a SecureString one character at a time (avoids ConvertTo-SecureString -AsPlainText).
+    [CmdletBinding()]
+    [OutputType([System.Security.SecureString])]
+    param([Parameter(Mandatory)][string]$Text)
+    $secure = New-Object -TypeName System.Security.SecureString
+    foreach ($c in $Text.ToCharArray()) { $secure.AppendChar($c) }
+    $secure.MakeReadOnly()
+    $secure
+}
+
+function Import-IamAdModule {
+    [CmdletBinding()]
+    param()
+    if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
+        throw ('ActiveDirectory module not found. On Windows 11: Settings > System > Optional features > ' +
+            'View features > "RSAT: Active Directory Domain Services and Lightweight Directory Services Tools".')
+    }
+    Import-Module ActiveDirectory -ErrorAction Stop -Verbose:$false
+}
+
+function Invoke-IamDeltaSync {
+    <#
+    .SYNOPSIS
+        Runs an Entra Connect delta sync on the sync server and waits for it to finish.
+    .DESCRIPTION
+        Needs WinRM to the server and membership of ADSyncOperators (or local admin) there.
+        Refuses a server in staging mode, which imports but never exports changes.
+        If a cycle is already running, waits for it, then starts a new one so the
+        latest AD change is included.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Server,
+        [int]$TimeoutSeconds = 600
+    )
+    $deadlineUtc = (Get-Date).ToUniversalTime().AddSeconds($TimeoutSeconds)
+    $result = Invoke-Command -ComputerName $Server -ErrorAction Stop -ScriptBlock {
+        Import-Module ADSync -ErrorAction Stop
+        $deadline = $using:deadlineUtc
+        $scheduler = Get-ADSyncScheduler
+        if ($scheduler.StagingModeEnabled) { throw "$env:COMPUTERNAME is in staging mode. Use the active Entra Connect server." }
+        while ((Get-ADSyncScheduler).SyncCycleInProgress) {
+            if ((Get-Date).ToUniversalTime() -gt $deadline) { throw 'A sync cycle was already running and did not finish in time.' }
+            Start-Sleep -Seconds 10
+        }
+        $start = Start-ADSyncSyncCycle -PolicyType Delta
+        Start-Sleep -Seconds 5
+        while ((Get-ADSyncScheduler).SyncCycleInProgress) {
+            if ((Get-Date).ToUniversalTime() -gt $deadline) { return "Started ($($start.Result)), still running at timeout" }
+            Start-Sleep -Seconds 10
+        }
+        "Completed ($($start.Result))"
+    }
+    Write-IamLog -Message "Delta sync on ${Server}: $result"
+    $result
+}
+
+function Wait-IamCloudUser {
+    <#
+    .SYNOPSIS
+        Polls Graph until a user matches a condition, or returns $null at timeout.
+        Returns 'Deleted' if the object no longer exists (for example, moved out of sync scope).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, ParameterSetName = 'Upn')][string]$UserPrincipalName,
+        [Parameter(Mandatory, ParameterSetName = 'Id')][string]$UserId,
+        [scriptblock]$Until = { param($u) $null -ne $u },
+        [int]$TimeoutSeconds = 600,
+        [int]$IntervalSeconds = 15
+    )
+    $props = 'Id', 'UserPrincipalName', 'AccountEnabled', 'OnPremisesSyncEnabled'
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ($true) {
+        $u = $null
+        if ($PSCmdlet.ParameterSetName -eq 'Upn') {
+            $u = Get-MgUser -Filter "userPrincipalName eq '$UserPrincipalName'" -Property $props -ErrorAction Stop
+        }
+        else {
+            try { $u = Get-MgUser -UserId $UserId -Property $props -ErrorAction Stop }
+            catch {
+                if ($_.Exception.Message -match 'Request_ResourceNotFound|does not exist|NotFound') { return 'Deleted' }
+                throw
+            }
+        }
+        if ($u -and (& $Until $u)) { return $u }
+        if ((Get-Date) -gt $deadline) { return $null }
+        Start-Sleep -Seconds $IntervalSeconds
+    }
 }
 
 function Connect-IamGraph {
@@ -112,5 +263,6 @@ function Remove-IamUserLicense {
     }
 }
 
-Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Connect-IamGraph, Assert-IamSyncState,
-    Revoke-IamUserSession, Remove-IamUserLicense
+Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
+    ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
+    Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense
