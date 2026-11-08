@@ -2,6 +2,11 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- README: install from a tagged release, a note for hybrid tenants, a "Before you run it in production" checklist, and the hybrid joiner back in the plan.
+
 ## [1.0.0] - 2026-11-08
 
 First release.

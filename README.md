@@ -10,7 +10,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | Folder | Contents |
 |---|---|
 | `Cloud/` | Joiner, mover, leaver for cloud-only users |
-| `Hybrid/` | Leaver and mover review for users synced from AD DS (planned) |
+| `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (planned for v1.1.0) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
@@ -23,10 +23,11 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Clone the repo. Use `git clone`, not a zip download: Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them. If you do use a zip, run `Get-ChildItem -Recurse -File | Unblock-File` in the folder.
+1. Get the latest tagged release, not `main`. Replace `v1.0.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
    ```powershell
-   git clone https://github.com/Hawkode/entra-iam-automation.git
+   git clone --branch v1.0.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
+   No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
 3. Run a read-only report first. It proves sign-in, consent and the module work in your tenant:
    ```powershell
@@ -34,7 +35,21 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
    ```
 4. Run lifecycle scripts with `-WhatIf`, then for real on a test user, then in normal use.
 
+**Hybrid tenants (users synced from AD DS):** the `Cloud/` lifecycle scripts refuse synced users by design, so in a hybrid tenant only the reports are usable until the `Hybrid/` scripts are released. Use the Cloud scripts only for cloud-only accounts.
+
 **Consent:** the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user in the tenant. Scripts use delegated sign-in only: no app registrations, no secrets.
+
+### Before you run it in production
+- **Approval:** get written approval before the first run, including read-only reports. They read directory data and write it to CSV.
+- **Consent blocked?** If the consent prompt asks for admin approval, or only offers to consent for the whole organisation, stop. A tenant-wide grant is a governance decision for your tenant owners, not a setup step.
+- **Execution policy:** check with `Get-ExecutionPolicy -List`. If Group Policy enforces `AllSigned`, sign the scripts with your organisation's code-signing certificate rather than loosening the policy.
+- **Accounts:** run the Graph scripts with a dedicated cloud-only admin account. Hybrid scripts also need an on-prem account with delegated rights on the target OUs. Do not use Domain Admin from a workstation.
+- **Departments:** `AllowedDepartments` must match the values already in your directory exactly. List them first:
+  ```powershell
+  Connect-MgGraph -TenantId '<your-tenant-id>' -Scopes 'User.Read.All' -NoWelcome
+  Get-MgUser -All -Property Department | Group-Object Department | Sort-Object Count -Descending | Select-Object Count, Name
+  ```
+- **Output:** CSVs and the log contain UPNs. Treat them as personal data and delete old files once they have served their purpose.
 
 ### Config reference
 | Key | Used by | Value |
@@ -47,7 +62,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `StaleDays` | Stale accounts | Days without sign-in before an account is flagged |
 | `BreakGlassUpns` | Leaver, reports | Emergency access accounts. Reports mark them as expected, the leaver refuses to touch them |
 | `AllowedDepartments` | Joiner, mover | Exact department names your dynamic groups key on |
-| `LeaversOU`, `EntraConnectServer` | Hybrid | Planned hybrid scripts |
+| `LeaversOU`, `EntraConnectServer` | Hybrid | Used by the hybrid scripts (planned for v1.1.0) |
 
 ## Cloud lifecycle
 | Script | Does | Graph scopes |
@@ -92,7 +107,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user and CSV) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested |
-| Hybrid/ leaver, mover review | Planned. A hybrid joiner is not planned: AD provisioning tools already cover the AD side |
+| Hybrid/ joiner, mover, leaver | Planned for v1.1.0 |
 
 ## Versioning
 Changes are listed in [CHANGELOG.md](CHANGELOG.md). Use a tagged release, not whatever is on `main` that day, and test it before you rely on it.
