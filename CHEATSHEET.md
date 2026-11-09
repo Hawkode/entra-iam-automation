@@ -10,7 +10,7 @@ Run from the repo folder, signed in with an admin account.
 
 ## Setup (once)
 ```powershell
-git clone --branch v1.2.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+git clone --branch v1.2.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
 cd C:\Tools\entra-iam-automation
 Copy-Item config.example.psd1 config.local.psd1   # then replace every example value
 ```

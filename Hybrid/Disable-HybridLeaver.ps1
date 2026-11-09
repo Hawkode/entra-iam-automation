@@ -162,10 +162,7 @@ $authMethods = @()
 if ($RemoveAuthMethods) { $authMethods = @(Get-IamUserAuthMethod -UserId $cloud.Id) }
 
 $manager = $null
-if ($ConvertMailbox -and -not $DelegateTo -and -not $NoDelegate -and $ad.Manager) {
-    $m = Get-ADUser -Identity $ad.Manager -Properties Enabled, UserPrincipalName
-    $manager = [pscustomobject]@{ UserPrincipalName = $m.UserPrincipalName; AccountEnabled = [bool]$m.Enabled }
-}
+if ($ConvertMailbox -and -not $DelegateTo -and -not $NoDelegate) { $manager = Get-IamAdManager -DistinguishedName $ad.Manager }
 $mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $UserPrincipalName -ConvertMailbox:$ConvertMailbox -DelegateTo $DelegateTo `
     -NoDelegate:$NoDelegate -Manager $manager -HasExchangePlan (Test-IamExchangePlan -User $cloudUser) `
     -WillRemoveLicence (-not $KeepLicense -and $directLicences -gt 0)

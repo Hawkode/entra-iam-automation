@@ -62,16 +62,10 @@ catch { throw "OU for $newDept not found: $newOU" }
 # Manager: validate the new one before any change, read the current one for the plan.
 $newManager = $null
 if ($Manager) {
-    $mUpn = $Manager.Trim()
-    if ($mUpn -eq $UserPrincipalName) { throw 'A user cannot be their own manager. Nothing changed.' }
-    $newManager = Get-ADUser -Filter "UserPrincipalName -eq '$mUpn'" -Properties Enabled, UserPrincipalName
-    if (-not $newManager) { throw "Manager $mUpn not found in AD. Nothing changed." }
-    if (-not $newManager.Enabled) { throw "Manager $mUpn is disabled in AD. Nothing changed." }
+    if ($Manager.Trim() -eq $UserPrincipalName) { throw 'A user cannot be their own manager. Nothing changed.' }
+    $newManager = Get-IamValidManager -UserPrincipalName $Manager -Source AD
 }
-$oldManager = $null
-if ($ad.Manager) {
-    try { $oldManager = Get-ADUser -Identity $ad.Manager -Properties Enabled, UserPrincipalName } catch { $oldManager = $null }
-}
+$oldManager = Get-IamAdManager -DistinguishedName $ad.Manager
 $oldManagerUpn = if ($oldManager) { $oldManager.UserPrincipalName } else { '(none)' }
 $managerChange = $newManager -and $ad.Manager -ne $newManager.DistinguishedName
 
@@ -89,17 +83,7 @@ if (-not $deptChange -and -not $moveOU -and -not $titleChange -and -not $manager
     return
 }
 
-if ($deptChange -and -not $Manager) {
-    if (-not $oldManager) {
-        Write-IamLog -Level WARN -Message "$UserPrincipalName has no manager in AD. Add -Manager so the leaver can hand over the mailbox later."
-    }
-    elseif (-not $oldManager.Enabled) {
-        Write-IamLog -Level WARN -Message "Manager $oldManagerUpn is disabled in AD. Add -Manager with the new manager."
-    }
-    else {
-        Write-IamLog -Level WARN -Message "Department changes but manager stays $oldManagerUpn. Add -Manager if that is wrong."
-    }
-}
+if ($deptChange -and -not $Manager) { Write-IamManagerWarning -UserPrincipalName $UserPrincipalName -CurrentManager $oldManager -Where ' in AD' }
 
 # Access that does not follow the department.
 $review = @()

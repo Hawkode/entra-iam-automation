@@ -53,11 +53,8 @@ if (-not $user.AccountEnabled) { throw "$UserPrincipalName is disabled. Movers a
 # Manager: validate the new one before any change, read the current one for the plan.
 $newManager = $null
 if ($Manager) {
-    $mUpn = $Manager.Trim()
-    if ($mUpn -eq $user.UserPrincipalName) { throw 'A user cannot be their own manager. Nothing changed.' }
-    try { $newManager = Get-MgUser -UserId $mUpn -Property Id, UserPrincipalName, AccountEnabled -ErrorAction Stop } catch { $newManager = $null }
-    if (-not $newManager) { throw "Manager $mUpn not found in Entra ID. Nothing changed." }
-    if (-not $newManager.AccountEnabled) { throw "Manager $mUpn is disabled. Nothing changed." }
+    if ($Manager.Trim() -eq $user.UserPrincipalName) { throw 'A user cannot be their own manager. Nothing changed.' }
+    $newManager = Get-IamValidManager -UserPrincipalName $Manager -Source Cloud
 }
 $oldManager = Get-IamCloudManager -UserId $user.Id
 $oldManagerUpn = if ($oldManager) { $oldManager.UserPrincipalName } else { '(none)' }
@@ -72,17 +69,7 @@ if (-not $deptChange -and -not $titleChange -and -not $managerChange) {
     return
 }
 
-if ($deptChange -and -not $Manager) {
-    if (-not $oldManager) {
-        Write-IamLog -Level WARN -Message "$UserPrincipalName has no manager. Add -Manager so the leaver can hand over the mailbox later."
-    }
-    elseif (-not $oldManager.AccountEnabled) {
-        Write-IamLog -Level WARN -Message "Manager $oldManagerUpn is disabled. Add -Manager with the new manager."
-    }
-    else {
-        Write-IamLog -Level WARN -Message "Department changes but manager stays $oldManagerUpn. Add -Manager if that is wrong."
-    }
-}
+if ($deptChange -and -not $Manager) { Write-IamManagerWarning -UserPrincipalName $UserPrincipalName -CurrentManager $oldManager }
 
 # Access that does not follow the department: assigned groups and active directory roles.
 # Read-only, so it runs and writes its CSV under -WhatIf too.
@@ -107,10 +94,7 @@ $what = $parts -join ', '
 
 if ($PSCmdlet.ShouldProcess($UserPrincipalName, $what)) {
     if ($body.Count -gt 0) { Update-MgUser -UserId $user.Id -BodyParameter $body }
-    if ($managerChange) {
-        $ref = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($newManager.Id)" } | ConvertTo-Json
-        Invoke-MgGraphRequest -Method PUT -Uri "v1.0/users/$($user.Id)/manager/`$ref" -Body $ref -ContentType 'application/json'
-    }
+    if ($managerChange) { Set-IamCloudManager -UserId $user.Id -ManagerId $newManager.Id -Confirm:$false }
     $msg = "Moved $UserPrincipalName. $what."
     if ($deptChange) { $msg += ' Dynamic groups update within minutes.' }
     Write-IamLog -Message $msg

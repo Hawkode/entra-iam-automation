@@ -22,7 +22,8 @@
     # Days without sign-in before Get-StaleAccounts flags an account.
     StaleDays            = 90
 
-    # Emergency access accounts. Reports mark them as expected, the leaver refuses to touch them.
+    # Emergency access accounts. The leaver refuses to touch them. Get-MfaRegistration flags them
+    # without phishing-resistant MFA, the other reports mark them as expected.
     BreakGlassUpns       = @('breakglass@contoso.onmicrosoft.com')
 
     # Exact department names your dynamic groups key on. Joiner and mover reject anything else.

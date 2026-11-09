@@ -132,10 +132,7 @@ if ($PSCmdlet.ParameterSetName -ne 'Resume') {
 
     $managerDNs = @{}
     foreach ($mUpn in @($plan.Manager | Where-Object { $_ } | Sort-Object -Unique)) {
-        $mAd = Get-ADUser -Filter "UserPrincipalName -eq '$mUpn'" -Properties Enabled
-        if (-not $mAd) { throw "Manager $mUpn not found in AD. Nothing was created." }
-        if (-not $mAd.Enabled) { throw "Manager $mUpn is disabled in AD. Nothing was created." }
-        $managerDNs[$mUpn] = $mAd.DistinguishedName
+        $managerDNs[$mUpn] = (Get-IamValidManager -UserPrincipalName $mUpn -Source AD -OnFail 'Nothing was created.').DistinguishedName
     }
     foreach ($p in $plan) { if ($p.Manager) { $p.ManagerDN = $managerDNs[$p.Manager] } }
 
@@ -263,5 +260,5 @@ if ($PSCmdlet.ParameterSetName -eq 'Resume') {
 }
 else {
     $results | Format-Table DisplayName, Upn, Department, Cloud, Licence, TempPassword -AutoSize
-    Write-Warning 'Temporary passwords are shown once. Pass them on through Bitwarden Send, not email or Teams.'
+    Write-Warning 'Temporary passwords are shown once. Pass them on through a one-time secret link, not email or chat.'
 }
