@@ -4,6 +4,10 @@
 $script:RepoRoot = Split-Path -Path $PSScriptRoot -Parent
 
 function Write-IamLog {
+    <#
+    .SYNOPSIS
+        Writes a timestamped line to output\iam-automation.log and to the console.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -124,7 +128,10 @@ function Get-IamRandomPassword {
 }
 
 function ConvertTo-IamSecureString {
-    # Builds a SecureString one character at a time (avoids ConvertTo-SecureString -AsPlainText).
+    <#
+    .SYNOPSIS
+        Builds a SecureString one character at a time (avoids ConvertTo-SecureString -AsPlainText).
+    #>
     [CmdletBinding()]
     [OutputType([System.Security.SecureString])]
     param([Parameter(Mandatory)][string]$Text)
@@ -135,6 +142,10 @@ function ConvertTo-IamSecureString {
 }
 
 function Import-IamAdModule {
+    <#
+    .SYNOPSIS
+        Loads the ActiveDirectory module, or throws with the RSAT install path.
+    #>
     [CmdletBinding()]
     param()
     if (-not (Get-Module -ListAvailable -Name ActiveDirectory)) {
@@ -410,9 +421,111 @@ function Get-IamCloudManager {
     [pscustomobject]@{ Id = $m.id; UserPrincipalName = $m.userPrincipalName; AccountEnabled = $m.accountEnabled }
 }
 
+# ---- Managers ----
+
+function Get-IamValidManager {
+    <#
+    .SYNOPSIS
+        Looks up a manager by UPN and checks it exists and is enabled. Throws otherwise.
+        Returns UserPrincipalName, Id (cloud), DistinguishedName (AD) and AccountEnabled.
+    .PARAMETER Source
+        Cloud: Entra ID (needs User.Read.All). AD: Active Directory (needs the AD module loaded).
+    .PARAMETER OnFail
+        Appended to the error, e.g. 'Nothing was created.'
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        [Parameter(Mandatory)][ValidateSet('Cloud', 'AD')][string]$Source,
+        [string]$OnFail = 'Nothing changed.'
+    )
+    $upn = $UserPrincipalName.Trim()
+    if ($Source -eq 'Cloud') {
+        $u = $null
+        try { $u = Get-MgUser -UserId $upn -Property Id, UserPrincipalName, AccountEnabled -ErrorAction Stop } catch { $u = $null }
+        if (-not $u) { throw "Manager $upn not found in Entra ID. $OnFail" }
+        if (-not $u.AccountEnabled) { throw "Manager $upn is disabled. $OnFail" }
+        return [pscustomobject]@{ UserPrincipalName = $upn; Id = $u.Id; DistinguishedName = $null; AccountEnabled = $true }
+    }
+    $a = Get-ADUser -Filter "UserPrincipalName -eq '$upn'" -Properties Enabled, UserPrincipalName
+    if (-not $a) { throw "Manager $upn not found in AD. $OnFail" }
+    if (-not $a.Enabled) { throw "Manager $upn is disabled in AD. $OnFail" }
+    [pscustomobject]@{ UserPrincipalName = $upn; Id = $null; DistinguishedName = $a.DistinguishedName; AccountEnabled = $true }
+}
+
+function Get-IamAdManager {
+    <#
+    .SYNOPSIS
+        Returns the AD manager behind a Manager attribute (UserPrincipalName, AccountEnabled,
+        DistinguishedName), or $null if the attribute is empty or the object cannot be read.
+    #>
+    [CmdletBinding()]
+    param([string]$DistinguishedName)
+    if (-not $DistinguishedName) { return $null }
+    try { $m = Get-ADUser -Identity $DistinguishedName -Properties Enabled, UserPrincipalName -ErrorAction Stop }
+    catch { return $null }
+    if (-not $m) { return $null }
+    [pscustomobject]@{ UserPrincipalName = $m.UserPrincipalName; AccountEnabled = [bool]$m.Enabled; DistinguishedName = $m.DistinguishedName }
+}
+
+function Set-IamCloudManager {
+    <#
+    .SYNOPSIS
+        Sets a user's manager in Entra ID. Retries for a user created seconds ago, which Graph
+        may not find yet. Throws after the last attempt. Needs User.ReadWrite.All.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$UserId,
+        [Parameter(Mandatory)][string]$ManagerId,
+        [ValidateRange(1, 10)][int]$Attempts = 1
+    )
+    if (-not $PSCmdlet.ShouldProcess($UserId, "Set manager $ManagerId")) { return }
+    $ref = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$ManagerId" } | ConvertTo-Json
+    for ($i = 1; $i -le $Attempts; $i++) {
+        try {
+            Invoke-MgGraphRequest -Method PUT -Uri "v1.0/users/$UserId/manager/`$ref" -Body $ref -ContentType 'application/json' -ErrorAction Stop | Out-Null
+            return
+        }
+        catch {
+            if ($i -eq $Attempts) { throw }
+            Start-Sleep -Seconds 5
+        }
+    }
+}
+
+function Write-IamManagerWarning {
+    <#
+    .SYNOPSIS
+        Mover warning when the department changes without -Manager: no manager, a disabled
+        manager, or a manager that stays from the old department.
+    .PARAMETER CurrentManager
+        Object with UserPrincipalName and AccountEnabled (Get-IamCloudManager, Get-IamAdManager), or $null.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        $CurrentManager,
+        [string]$Where = ''
+    )
+    if (-not $CurrentManager) {
+        $msg = "$UserPrincipalName has no manager$Where. Add -Manager so the leaver can hand over the mailbox later."
+    }
+    elseif (-not $CurrentManager.AccountEnabled) {
+        $msg = "Manager $($CurrentManager.UserPrincipalName) is disabled$Where. Add -Manager with the new manager."
+    }
+    else {
+        $msg = "Department changes but manager stays $($CurrentManager.UserPrincipalName). Add -Manager if that is wrong."
+    }
+    Write-IamLog -Level WARN -Message $msg
+}
+
 function Test-IamExchangePlan {
-    # True if the user's assigned plans include an enabled Exchange Online service plan
-    # (so licence removal would start the mailbox deletion clock). Pass a user with AssignedPlans.
+    <#
+    .SYNOPSIS
+        True if the user's assigned plans include an enabled Exchange Online service plan
+        (so licence removal would start the mailbox deletion clock). Pass a user with AssignedPlans.
+    #>
     param([Parameter(Mandatory)]$User)
     [bool](@($User.AssignedPlans) | Where-Object { $_.Service -eq 'exchange' -and $_.CapabilityStatus -eq 'Enabled' })
 }
@@ -497,6 +610,10 @@ function Get-IamLeaverMailboxPlan {
 }
 
 function Connect-IamGraph {
+    <#
+    .SYNOPSIS
+        Signs in to Microsoft Graph with delegated scopes and logs the tenant, account and scopes.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$TenantId,
@@ -508,6 +625,10 @@ function Connect-IamGraph {
 }
 
 function Assert-IamSyncState {
+    <#
+    .SYNOPSIS
+        Stops if a user is synced from AD when a cloud script runs, or cloud-only when a hybrid script runs.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$UserPrincipalName,
@@ -521,6 +642,10 @@ function Assert-IamSyncState {
 }
 
 function Revoke-IamUserSession {
+    <#
+    .SYNOPSIS
+        Revokes all sign-in sessions and refresh tokens for a user.
+    #>
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$UserId)
     if ($PSCmdlet.ShouldProcess($UserId, 'Revoke all sign-in sessions')) {
@@ -530,8 +655,11 @@ function Revoke-IamUserSession {
 }
 
 function Remove-IamUserLicense {
-    # Direct assignments only. Group-assigned licences go when the user leaves the group,
-    # and trying to remove them directly makes the whole call fail.
+    <#
+    .SYNOPSIS
+        Removes directly assigned licences. Group-assigned licences go when the user leaves the
+        group, and trying to remove them directly makes the whole call fail.
+    #>
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$UserId)
     $user = Get-MgUser -UserId $UserId -Property LicenseAssignmentStates -ErrorAction Stop
@@ -548,4 +676,5 @@ Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
-    Resolve-IamDelegate, Get-IamLeaverMailboxPlan
+    Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
+    Write-IamManagerWarning

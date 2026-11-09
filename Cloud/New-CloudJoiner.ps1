@@ -111,11 +111,7 @@ foreach ($p in $plan) {
 
 $managerIds = @{}
 foreach ($mUpn in @($plan.Manager | Where-Object { $_ } | Sort-Object -Unique)) {
-    $mUser = $null
-    try { $mUser = Get-MgUser -UserId $mUpn -Property Id, AccountEnabled -ErrorAction Stop } catch { $mUser = $null }
-    if (-not $mUser) { throw "Manager $mUpn not found in Entra ID. Nothing was created." }
-    if (-not $mUser.AccountEnabled) { throw "Manager $mUpn is disabled. Nothing was created." }
-    $managerIds[$mUpn] = $mUser.Id
+    $managerIds[$mUpn] = (Get-IamValidManager -UserPrincipalName $mUpn -Source Cloud -OnFail 'Nothing was created.').Id
 }
 
 $skuId = $null
@@ -153,19 +149,12 @@ $results = foreach ($p in $plan) {
     $managerSet = ''
     if ($p.Manager) {
         $managerSet = 'FAILED'
-        $ref = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($managerIds[$p.Manager])" } | ConvertTo-Json
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            try {
-                Invoke-MgGraphRequest -Method PUT -Uri "v1.0/users/$($user.Id)/manager/`$ref" -Body $ref -ContentType 'application/json' | Out-Null
-                $managerSet = $p.Manager
-                Write-IamLog -Message "Manager of $($p.Upn) set to $($p.Manager)"
-                break
-            }
-            catch {
-                if ($attempt -eq 3) { Write-IamLog -Level ERROR -Message "Manager not set on $($p.Upn): $($_.Exception.Message)" }
-                else { Start-Sleep -Seconds 5 }
-            }
+        try {
+            Set-IamCloudManager -UserId $user.Id -ManagerId $managerIds[$p.Manager] -Attempts 3 -Confirm:$false
+            $managerSet = $p.Manager
+            Write-IamLog -Message "Manager of $($p.Upn) set to $($p.Manager)"
         }
+        catch { Write-IamLog -Level ERROR -Message "Manager not set on $($p.Upn): $($_.Exception.Message)" }
     }
 
     $licence = 'Skipped'
@@ -204,5 +193,5 @@ if ($results.Count -gt 0) {
     Write-IamLog -Message "Joiners created: $($results.Count). CSV (no passwords): $csv"
 
     $results | Format-Table DisplayName, Upn, Department, Manager, Licence, TempPassword -AutoSize
-    Write-Warning 'Temporary passwords are shown once. Pass them on through Bitwarden Send, not email or Teams.'
+    Write-Warning 'Temporary passwords are shown once. Pass them on through a one-time secret link, not email or chat.'
 }

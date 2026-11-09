@@ -24,9 +24,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.2.1` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
+1. Get the latest tagged release, not `main`. Replace `v1.2.2` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.2.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.2.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
@@ -50,7 +50,6 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
   Connect-MgGraph -TenantId '<your-tenant-id>' -Scopes 'User.Read.All' -NoWelcome
   Get-MgUser -All -Property Department | Group-Object Department | Sort-Object Count -Descending | Select-Object Count, Name
   ```
-- **Output:** CSVs and the log contain UPNs. Treat them as personal data and delete old files once they have served their purpose.
 
 ### Config reference
 | Key | Used by | Value |
@@ -61,7 +60,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `UsageLocation` | Joiner | Two-letter country code, e.g. `GB` |
 | `LicenseSkuPartNumber` | Joiner | SKU to assign (`Get-MgSubscribedSku`). Not needed with `-SkipLicense` |
 | `StaleDays` | Stale accounts | Days without sign-in before an account is flagged |
-| `BreakGlassUpns` | Leaver, reports | Emergency access accounts. Reports mark them as expected, the leaver refuses to touch them |
+| `BreakGlassUpns` | Leaver, reports | Emergency access accounts. The leaver refuses to touch them. `Get-MfaRegistration` flags them without phishing-resistant MFA, the other reports mark them as expected |
 | `AllowedDepartments` | Joiner, mover | Exact department names your dynamic groups key on |
 | `DepartmentOUs` | Hybrid joiner, mover | Department name to OU. The keys are the allowed departments in hybrid scripts |
 | `LeaversOU` | Hybrid leaver | OU for disabled leavers. Check its sync scope first (see below) |
@@ -85,7 +84,20 @@ Both joiners take `-Manager <upn>` (or a `Manager` CSV column). Both movers take
 | `Move-HybridUser.ps1` | Changes department and title in AD, moves the account to the new department's OU, syncs. Lists AD groups, cloud-only groups and roles that do not move | `User.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` (read-only) |
 | `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
 
-### Leaver options (cloud and hybrid)
+### Hybrid requirements
+- RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
+- An on-prem account with delegated rights on the OUs in `DepartmentOUs` and `LeaversOU`: create, edit, move, disable and reset password on users, and remove members from their groups. Not Domain Admin.
+- WinRM to `EntraConnectServer`, and membership of `ADSyncOperators` (or local admin) on it.
+- `DefaultDomain` must be a UPN suffix in AD (AD Domains and Trusts) and a verified domain in Entra ID. The joiner checks the AD side.
+
+### Check the Leavers OU sync scope first
+On the Entra Connect server: Microsoft Entra Connect > **Configure** > **Customize synchronization options** > **Domain and OU filtering**. Read the setting, then **Cancel**.
+- **Leavers OU inside the scope:** the cloud account stays, disabled. The leaver revokes sessions and removes licences.
+- **Leavers OU outside the scope:** the sync **deletes** the cloud account (Deleted users, 30 days) and **soft-deletes its mailbox**. The leaver detects this and skips the cloud steps. `-ConvertMailbox` refuses to run in this setup (`LeaversOUInSyncScope = $false`): if the mailbox has to be kept, convert it by hand before running the leaver.
+
+The same applies to the mover: if a department OU is outside the scope, moving a user into it deletes their cloud account. The mover checks after the sync and reports it.
+
+## Leaver options (cloud and hybrid)
 | Option | Does | Needs |
 |---|---|---|
 | `-RemoveAuthMethods` | Removes every registered MFA method (Authenticator, phone, FIDO2, OATH, Windows Hello, TAP, email). Two passes, because Graph only removes the default method once it is the last one | `UserAuthenticationMethod.ReadWrite.All` (Critical, requested only with this switch) and Authentication Administrator |
@@ -100,25 +112,12 @@ Both joiners take `-Manager <upn>` (or a `Manager` CSV column). Both movers take
 - **Mailbox access is personal data.** Access to a leaver's mailbox usually needs HR approval. Agree the "manager gets Full Access" default as policy, or name the person with `-DelegateTo`.
 - **On-prem Exchange:** if an on-prem Exchange server still manages recipients, also run `Set-RemoteMailbox -Type Shared` on-prem.
 
-### Requirements
-- RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
-- An on-prem account with delegated rights on the OUs in `DepartmentOUs` and `LeaversOU`: create, edit, move, disable and reset password on users, and remove members from their groups. Not Domain Admin.
-- WinRM to `EntraConnectServer`, and membership of `ADSyncOperators` (or local admin) on it.
-- `DefaultDomain` must be a UPN suffix in AD (AD Domains and Trusts) and a verified domain in Entra ID. The joiner checks the AD side.
-
-### Check the Leavers OU sync scope first
-On the Entra Connect server: Microsoft Entra Connect > **Configure** > **Customize synchronization options** > **Domain and OU filtering**. Read the setting, then **Cancel**.
-- **Leavers OU inside the scope:** the cloud account stays, disabled. The leaver revokes sessions and removes licences.
-- **Leavers OU outside the scope:** the sync **deletes** the cloud account (Deleted users, 30 days) and **soft-deletes its mailbox**. The leaver detects this and skips the cloud steps. Convert the mailbox to shared **before** running the leaver if it has to be kept.
-
-The same applies to the mover: if a department OU is outside the scope, moving a user into it deletes their cloud account. The mover checks after the sync and reports it.
-
-### Safety controls
+## Safety controls
 - **Config check:** every script validates the config values it needs before signing in.
 - **Sync guard:** Cloud scripts stop on users synced from AD. Hybrid scripts stop on cloud-only users.
 - **Soft-match guard:** the hybrid joiner stops if the UPN already exists in Entra ID, because Entra Connect would match the new AD account onto that cloud account and take it over.
-- **Department allowlist:** departments must match `AllowedDepartments`, so a typo cannot create a user outside every dynamic group.
-- **Validate first:** the joiner checks every row and every UPN before creating anything. One bad row, nothing created.
+- **Department allowlist:** departments must match `AllowedDepartments` (cloud) or a key of `DepartmentOUs` (hybrid), so a typo cannot create a user outside every dynamic group.
+- **Validate first:** the joiner checks every row, UPN and manager before creating anything. One bad row, nothing created. The mover checks the new manager before changing anything.
 - **`-WhatIf`** on every script that changes something.
 - **Leavers:** list the full plan, then ask for confirmation once. Refuse break-glass accounts and the signed-in admin. The hybrid leaver also refuses AD protected accounts (`adminCount = 1`, members of Domain Admins and similar), which need a Tier 0 admin.
 - **Hybrid leaver order:** sessions are revoked only after Entra ID shows the account as disabled. Before that, with password hash sync, the old password still works in the cloud.
@@ -136,7 +135,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 | `Get-ManagerCoverage.ps1` | Enabled users with no manager or a disabled manager. The leavers' mailbox handover depends on it | `User.Read.All` | Free |
 
 ## Output and logs
-Every script writes a timestamped CSV to `output/` and appends to `output/iam-automation.log`. Both contain UPNs, so `output/` is gitignored. Treat it as personal data.
+Every script writes a timestamped CSV to `output/` and appends to `output/iam-automation.log`. Both contain UPNs: `output/` is gitignored, keep the folder out of OneDrive and other synced folders, and delete old files once they have served their purpose.
 
 ## Known limitations
 - The leavers do not handle OneDrive handover, devices or shared credentials. Keep those in your offboarding checklist.
@@ -153,14 +152,14 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab |
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` untested |
-| Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user and CSV) |
-| Cloud/Move-CloudUser.ps1 | Done, tested in lab. `-Manager` (v1.2.1) tested offline only |
-| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested. v1.2 options (`-RemoveAuthMethods`, `-ConvertMailbox`) tested offline only |
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
+| Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
+| Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`) |
+| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licences, `-RemoveAuthMethods` and `-ConvertMailbox` tested offline only |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
-| Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD, Graph and Exchange mocked. Not yet tested against a real domain |
 
 ## Cheat sheet
 All commands with example values, ready to copy: [CHEATSHEET.md](CHEATSHEET.md). In a terminal, `Get-Help <script> -Examples` shows the examples for one script.

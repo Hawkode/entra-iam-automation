@@ -2,6 +2,18 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] - 2026-11-09
+
+Tidy-up. No new features.
+
+### Changed
+- Shared module: `Get-IamValidManager`, `Get-IamAdManager`, `Set-IamCloudManager` and `Write-IamManagerWarning` replace manager code that was repeated in the joiners, movers and hybrid leaver.
+- Hybrid leaver: reading the AD manager no longer fails if the Manager attribute points at an object that cannot be read.
+- Joiners: the temporary password warning names no specific product.
+- Shared module: help text on every function.
+- README: leaver options in their own section, hybrid requirements renamed, status table ordered by folder, output warning in one place, `BreakGlassUpns` and Leavers OU sync scope text brought up to date.
+- `config.example.psd1`: `BreakGlassUpns` comment brought up to date.
+
 ## [1.2.1] - 2026-11-09
 
 ### Added
