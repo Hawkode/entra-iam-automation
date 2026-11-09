@@ -23,14 +23,20 @@
     Graph scopes (delegated): User.ReadWrite.All, LicenseAssignment.Read.All
     Entra role for the signed-in admin: User Administrator
 
+.PARAMETER Manager
+    UPN of the new user's manager. Must exist and be enabled. Sets the Manager attribute,
+    which the leaver later uses to hand over the mailbox.
+
 .PARAMETER CsvPath
-    CSV with columns GivenName, Surname, Department, JobTitle (JobTitle optional).
+    CSV with columns GivenName, Surname, Department, JobTitle, Manager (JobTitle and Manager optional).
 
 .PARAMETER SkipLicense
     Create the users without assigning a licence (for example, group-based licensing).
 
 .EXAMPLE
     .\Cloud\New-CloudJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -WhatIf
+.EXAMPLE
+    .\Cloud\New-CloudJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -Manager grace.miller@contoso.onmicrosoft.com
 .EXAMPLE
     .\Cloud\New-CloudJoiner.ps1 -CsvPath .\samples\joiners.example.csv
 #>
@@ -40,6 +46,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Single')][string]$Surname,
     [Parameter(Mandatory, ParameterSetName = 'Single')][string]$Department,
     [Parameter(ParameterSetName = 'Single')][string]$JobTitle,
+    [Parameter(ParameterSetName = 'Single')][string]$Manager,
     [Parameter(Mandatory, ParameterSetName = 'Csv')][string]$CsvPath,
     [switch]$SkipLicense
 )
@@ -58,7 +65,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Csv') {
     $rows = @(Import-Csv -Path $CsvPath -Encoding UTF8)
 }
 else {
-    $rows = @([pscustomobject]@{ GivenName = $GivenName; Surname = $Surname; Department = $Department; JobTitle = $JobTitle })
+    $rows = @([pscustomobject]@{ GivenName = $GivenName; Surname = $Surname; Department = $Department; JobTitle = $JobTitle; Manager = $Manager })
 }
 if ($rows.Count -eq 0) { throw 'No joiners to process.' }
 
@@ -83,6 +90,7 @@ $plan = foreach ($r in $rows) {
         DisplayName  = "$gn $sn"
         Department   = $dept
         JobTitle     = "$($r.JobTitle)".Trim()
+        Manager      = "$($r.Manager)".Trim()
         MailNickname = $nick
         Upn          = "$nick@$($cfg.DefaultDomain)"
     }
@@ -101,6 +109,15 @@ foreach ($p in $plan) {
     }
 }
 
+$managerIds = @{}
+foreach ($mUpn in @($plan.Manager | Where-Object { $_ } | Sort-Object -Unique)) {
+    $mUser = $null
+    try { $mUser = Get-MgUser -UserId $mUpn -Property Id, AccountEnabled -ErrorAction Stop } catch { $mUser = $null }
+    if (-not $mUser) { throw "Manager $mUpn not found in Entra ID. Nothing was created." }
+    if (-not $mUser.AccountEnabled) { throw "Manager $mUpn is disabled. Nothing was created." }
+    $managerIds[$mUpn] = $mUser.Id
+}
+
 $skuId = $null
 if (-not $SkipLicense) {
     $sku = Get-MgSubscribedSku -All | Where-Object { $_.SkuPartNumber -eq $cfg.LicenseSkuPartNumber }
@@ -113,6 +130,7 @@ if (-not $SkipLicense) {
 $results = foreach ($p in $plan) {
     $action = "Create cloud user ($($p.Department))"
     if ($skuId) { $action += " and assign $($cfg.LicenseSkuPartNumber)" }
+    if ($p.Manager) { $action += ", manager $($p.Manager)" }
     if (-not $PSCmdlet.ShouldProcess($p.Upn, $action)) { continue }
 
     $password = Get-IamRandomPassword
@@ -131,6 +149,24 @@ $results = foreach ($p in $plan) {
 
     $user = New-MgUser -BodyParameter $body
     Write-IamLog -Message "Created $($p.Upn) ($($p.Department)). Id: $($user.Id)"
+
+    $managerSet = ''
+    if ($p.Manager) {
+        $managerSet = 'FAILED'
+        $ref = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/users/$($managerIds[$p.Manager])" } | ConvertTo-Json
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            try {
+                Invoke-MgGraphRequest -Method PUT -Uri "v1.0/users/$($user.Id)/manager/`$ref" -Body $ref -ContentType 'application/json' | Out-Null
+                $managerSet = $p.Manager
+                Write-IamLog -Message "Manager of $($p.Upn) set to $($p.Manager)"
+                break
+            }
+            catch {
+                if ($attempt -eq 3) { Write-IamLog -Level ERROR -Message "Manager not set on $($p.Upn): $($_.Exception.Message)" }
+                else { Start-Sleep -Seconds 5 }
+            }
+        }
+    }
 
     $licence = 'Skipped'
     if ($skuId) {
@@ -155,6 +191,7 @@ $results = foreach ($p in $plan) {
         Upn          = $p.Upn
         Department   = $p.Department
         Licence      = $licence
+        Manager      = $managerSet
         TempPassword = $password
         Id           = $user.Id
     }
@@ -166,6 +203,6 @@ if ($results.Count -gt 0) {
     $results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv -NoTypeInformation
     Write-IamLog -Message "Joiners created: $($results.Count). CSV (no passwords): $csv"
 
-    $results | Format-Table DisplayName, Upn, Department, Licence, TempPassword -AutoSize
+    $results | Format-Table DisplayName, Upn, Department, Manager, Licence, TempPassword -AutoSize
     Write-Warning 'Temporary passwords are shown once. Pass them on through Bitwarden Send, not email or Teams.'
 }

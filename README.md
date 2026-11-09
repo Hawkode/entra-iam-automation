@@ -18,14 +18,15 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 ## Requirements
 - Windows PowerShell 5.1 or PowerShell 7.
 - Microsoft Graph PowerShell SDK: `Install-Module Microsoft.Graph -Scope CurrentUser`
+- For the leavers' `-ConvertMailbox` only: `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
-- Licences: lifecycle scripts and `Get-RiskyAppPermissions` work on Entra ID Free. `Get-StaleAccounts` needs P1. PIM data in `Get-StandingAdmins` needs P2.
+- Licences: lifecycle scripts, `Get-RiskyAppPermissions` and `Get-ManagerCoverage` work on Entra ID Free. `Get-StaleAccounts` and `Get-MfaRegistration` need P1. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.1.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
+1. Get the latest tagged release, not `main`. Replace `v1.2.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
    ```powershell
-   git clone --branch v1.1.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.2.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
@@ -66,13 +67,16 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `LeaversOU` | Hybrid leaver | OU for disabled leavers. Check its sync scope first (see below) |
 | `EntraConnectServer` | Hybrid | Active Entra Connect server (not staging) |
 | `ProtectedAdGroups` | Hybrid leaver, mover | AD groups never removed or listed. Default `Domain Users` |
+| `LeaversOUInSyncScope` | Hybrid leaver with `-ConvertMailbox` | `$true` only after checking that `LeaversOU` is inside the Entra Connect sync scope (see below) |
 
 ## Cloud lifecycle
 | Script | Does | Graph scopes |
 |---|---|---|
 | `New-CloudJoiner.ps1` | Creates users (single or CSV), sets department and usage location, assigns the licence | `User.ReadWrite.All`, `LicenseAssignment.Read.All` |
 | `Move-CloudUser.ps1` | Changes department so dynamic groups re-scope access, lists assigned groups and roles that do not move | `User.ReadWrite.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` |
-| `Disable-CloudLeaver.ps1` | Disables, revokes sessions, removes assigned groups and direct licences, clears department | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+| `Disable-CloudLeaver.ps1` | Disables, revokes sessions, removes assigned groups and direct licences, clears department. Options below | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+
+Both joiners take `-Manager <upn>` (or a `Manager` CSV column). The leavers use the manager later to hand over the mailbox.
 
 ## Hybrid lifecycle
 | Script | Does | Graph scopes |
@@ -80,6 +84,21 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `New-HybridJoiner.ps1` | Creates the user in AD in the department's OU, runs a delta sync, waits for the user in Entra ID, sets usage location and assigns the licence. `-ResumeUserPrincipalName` finishes the cloud steps later if the sync is slow | `User.ReadWrite.All`, `LicenseAssignment.Read.All` |
 | `Move-HybridUser.ps1` | Changes department and title in AD, moves the account to the new department's OU, syncs. Lists AD groups, cloud-only groups and roles that do not move | `User.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` (read-only) |
 | `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+
+### Leaver options (cloud and hybrid)
+| Option | Does | Needs |
+|---|---|---|
+| `-RemoveAuthMethods` | Removes every registered MFA method (Authenticator, phone, FIDO2, OATH, Windows Hello, TAP, email). Two passes, because Graph only removes the default method once it is the last one | `UserAuthenticationMethod.ReadWrite.All` (Critical, requested only with this switch) and Authentication Administrator |
+| `-ConvertMailbox` | Converts the mailbox to shared before the licence goes. Gives Full Access to the manager by default | `ExchangeOnlineManagement` and Exchange Recipient Management |
+| `-DelegateTo <upn>` / `-NoDelegate` | Someone other than the manager gets access, or nobody does | `-ConvertMailbox` |
+| `-AutoReplyMessage '<text>'` | Sets an automatic reply on the shared mailbox | `-ConvertMailbox` |
+| `-HideFromGal` | Hides from the address list. Cloud: on the mailbox. Hybrid: in AD (`msExchHideFromAddressLists`), only if the Exchange schema is in AD | Cloud: `-ConvertMailbox` |
+
+- **The licence stays automatically** if the shared mailbox still needs one: over 50 GB, litigation hold or an active archive. If conversion fails, the licence stays too.
+- **Without `-ConvertMailbox`**, the plan warns when a licensed mailbox would be deleted 30 days after the licence goes.
+- **Hybrid order:** the mailbox is converted first, before any AD change, and only when `LeaversOUInSyncScope = $true`. A shared mailbox belongs to its user object: if the sync deletes the cloud account, the mailbox goes with it.
+- **Mailbox access is personal data.** Access to a leaver's mailbox usually needs HR approval. Agree the "manager gets Full Access" default as policy, or name the person with `-DelegateTo`.
+- **On-prem Exchange:** if an on-prem Exchange server still manages recipients, also run `Set-RemoteMailbox -Type Shared` on-prem.
 
 ### Requirements
 - RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
@@ -104,6 +123,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 - **Leavers:** list the full plan, then ask for confirmation once. Refuse break-glass accounts and the signed-in admin. The hybrid leaver also refuses AD protected accounts (`adminCount = 1`, members of Domain Admins and similar), which need a Tier 0 admin.
 - **Hybrid leaver order:** sessions are revoked only after Entra ID shows the account as disabled. Before that, with password hash sync, the old password still works in the cloud.
 - **Not automated on purpose:** removing directory roles (would need `RoleManagement.ReadWrite.Directory`). Reported for manual action instead.
+- **Critical scopes only on request:** `UserAuthenticationMethod.ReadWrite.All` is requested only when `-RemoveAuthMethods` is used.
 - **Temporary passwords** are shown once in the console and never logged or written to CSV.
 
 ## Reports
@@ -112,12 +132,15 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 | `Get-RiskyAppPermissions.ps1` | Apps with high-risk Graph permissions and whether they hold a credential. Always shows tenant-wide (all users) delegated grants | `Application.Read.All`, `DelegatedPermissionGrant.Read.All` | Free |
 | `Get-StandingAdmins.ps1` | Permanent privileged role holders, PIM eligible vs active | `RoleManagement.Read.Directory`, `Directory.Read.All` | P2 for PIM data, falls back without |
 | `Get-StaleAccounts.ps1` | Enabled accounts with no recent sign-in, or none ever | `User.Read.All`, `AuditLog.Read.All` | P1 or P2 |
+| `Get-MfaRegistration.ps1` | Users with no MFA, only weak methods (SMS, voice, email), admins and break-glass accounts without a phishing-resistant method | `AuditLog.Read.All` (role: Reports Reader) | P1 or P2 |
+| `Get-ManagerCoverage.ps1` | Enabled users with no manager or a disabled manager. The leavers' mailbox handover depends on it | `User.Read.All` | Free |
 
 ## Output and logs
 Every script writes a timestamped CSV to `output/` and appends to `output/iam-automation.log`. Both contain UPNs, so `output/` is gitignored. Treat it as personal data.
 
 ## Known limitations
-- The leaver does not handle mailboxes (convert to shared **before** removing an Exchange licence), OneDrive handover, devices, MFA methods or shared credentials. Keep those in your offboarding checklist.
+- The leavers do not handle OneDrive handover, devices or shared credentials. Keep those in your offboarding checklist.
+- `-RemoveAuthMethods` reports any method type it does not recognise for manual removal. Graph cannot remove the default method while another method remains, so one unrecognised method can leave the default in place too.
 - The hybrid joiner does not provision mailboxes through on-prem Exchange (`Enable-RemoteMailbox`). It fits tenants where Exchange Online creates the mailbox when the licence is assigned.
 - The joiner assigns one licence SKU per run. For per-department licences, use group-based licensing and `-SkipLicense`.
 - `signInActivity` can lag real sign-ins by a few hours. Fine for 30 or 90-day thresholds, not live data.
@@ -132,7 +155,9 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` untested |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user and CSV) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab |
-| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested |
+| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested. v1.2 options (`-RemoveAuthMethods`, `-ConvertMailbox`) tested offline only |
+| Reports/Get-MfaRegistration.ps1 | Done, tested offline only |
+| Reports/Get-ManagerCoverage.ps1 | Done, tested offline only |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |

@@ -2,13 +2,23 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0] - 2026-11-09
+
+New options and reports are tested offline with Graph, Exchange Online and AD mocked, not yet in a live tenant.
 
 ### Added
+- Leavers (cloud and hybrid): `-RemoveAuthMethods` removes every registered MFA method. Its Critical scope is requested only when the switch is used.
+- Leavers (cloud and hybrid): `-ConvertMailbox` converts the mailbox to shared before the licence goes, with `-DelegateTo`, `-NoDelegate`, `-AutoReplyMessage` and `-HideFromGal`. Full Access goes to the manager by default.
+- Leavers: the licence stays automatically when the shared mailbox still needs one (over 50 GB, litigation hold, archive) or when conversion fails.
+- Leavers: the plan warns when a licensed mailbox would be deleted because `-ConvertMailbox` was not used.
+- Joiners (cloud and hybrid): `-Manager` and a `Manager` CSV column, validated before anything is created.
+- Reports: `Get-MfaRegistration` (no MFA, weak methods only, admins and break-glass accounts without phishing-resistant MFA) and `Get-ManagerCoverage`.
+- Config key `LeaversOUInSyncScope`: the hybrid leaver's `-ConvertMailbox` refuses to run unless it is `$true`.
 - `CHEATSHEET.md`: every command with example values, linked from the README.
 
 ### Changed
 - Lint workflow: `actions/checkout@v7` (Dependabot).
+- Sample CSV: `Manager` column, indentation removed.
 
 ## [1.1.0] - 2026-11-08
 
