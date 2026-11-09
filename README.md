@@ -24,9 +24,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.2.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
+1. Get the latest tagged release, not `main`. Replace `v1.2.1` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders: `output/` holds UPNs.
    ```powershell
-   git clone --branch v1.2.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.2.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
@@ -76,7 +76,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Move-CloudUser.ps1` | Changes department so dynamic groups re-scope access, lists assigned groups and roles that do not move | `User.ReadWrite.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` |
 | `Disable-CloudLeaver.ps1` | Disables, revokes sessions, removes assigned groups and direct licences, clears department. Options below | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
 
-Both joiners take `-Manager <upn>` (or a `Manager` CSV column). The leavers use the manager later to hand over the mailbox.
+Both joiners take `-Manager <upn>` (or a `Manager` CSV column). Both movers take `-Manager` too, and warn when the department changes but the manager does not. The leavers use the manager to hand over the mailbox.
 
 ## Hybrid lifecycle
 | Script | Does | Graph scopes |
@@ -154,10 +154,10 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` untested |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user and CSV) |
-| Cloud/Move-CloudUser.ps1 | Done, tested in lab |
+| Cloud/Move-CloudUser.ps1 | Done, tested in lab. `-Manager` (v1.2.1) tested offline only |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licence path untested. v1.2 options (`-RemoveAuthMethods`, `-ConvertMailbox`) tested offline only |
-| Reports/Get-MfaRegistration.ps1 | Done, tested offline only |
-| Reports/Get-ManagerCoverage.ps1 | Done, tested offline only |
+| Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
+| Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |

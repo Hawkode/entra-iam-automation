@@ -1,90 +1,66 @@
 # Cheat sheet
 
-Copy, change the values, run. Run everything from the repo folder, signed in with an admin account.
-Every script that changes something supports `-WhatIf`: run it first, read the plan, then run again without it.
+Run from the repo folder, signed in with an admin account.
 
-Per-script help with more examples: `Get-Help .\Hybrid\Disable-HybridLeaver.ps1 -Full`
+**Rule:** run with `-WhatIf` first, read the plan, then run the same line again without `-WhatIf`.
 
-## Which scripts?
-- **Users synced from AD DS** (hybrid): `Hybrid\`
-- **Cloud-only users**: `Cloud\`
-- Not sure? Run either one. The wrong one stops with "is synced from AD" or "is cloud-only" before it changes anything.
+- Users synced from AD: `Hybrid\`. Cloud-only users: `Cloud\`.
+- Wrong one? It stops with "is synced from AD" or "is cloud-only" before changing anything.
+- More examples per script: `Get-Help .\Cloud\Disable-CloudLeaver.ps1 -Full`
 
 ## Setup (once)
 ```powershell
-git clone --branch v1.2.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+git clone --branch v1.2.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
 cd C:\Tools\entra-iam-automation
 Copy-Item config.example.psd1 config.local.psd1   # then replace every example value
 ```
 
-## Reports (read-only)
+## Cloud-only users
 ```powershell
-.\Reports\Get-RiskyAppPermissions.ps1
-.\Reports\Get-RiskyAppPermissions.ps1 -MinimumRisk Low
-.\Reports\Get-StandingAdmins.ps1 -PrivilegedOnly
+.\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
+.\Cloud\Move-CloudUser.ps1 -UserPrincipalName jane.doe@contoso.com -Department HR -JobTitle 'HR Assistant' -Manager sarah.jones@contoso.com -WhatIf
+.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -RemoveAuthMethods -ConvertMailbox -WhatIf
+```
+
+## Hybrid users (synced from AD)
+```powershell
+.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
+.\Hybrid\Move-HybridUser.ps1 -UserPrincipalName jane.doe@contoso.com -Department HR -JobTitle 'HR Assistant' -Manager sarah.jones@contoso.com -WhatIf
+.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -RemoveAuthMethods -ConvertMailbox -WhatIf
+```
+
+## Reports (read-only, no -WhatIf)
+```powershell
+.\Reports\Get-MfaRegistration.ps1
 .\Reports\Get-StaleAccounts.ps1 -StaleDays 90
-.\Reports\Get-StaleAccounts.ps1 -StaleDays 90 -IncludeOnPrem   # hybrid: also checks AD lastLogonTimestamp
-.\Reports\Get-MfaRegistration.ps1                                # needs P1
+.\Reports\Get-StandingAdmins.ps1 -PrivilegedOnly
+.\Reports\Get-RiskyAppPermissions.ps1
 .\Reports\Get-ManagerCoverage.ps1
 ```
 
-## Hybrid (users synced from AD DS)
-```powershell
-# Joiner: one user, with manager
-.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
-.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com
+## Extras
+Add to the lines above when needed.
 
-# Joiner: a list (columns GivenName, Surname, Department, JobTitle, Manager). Name real lists *.local.csv so git ignores them.
-.\Hybrid\New-HybridJoiner.ps1 -CsvPath .\joiners.local.csv -WhatIf
+| Add | To | Does |
+|---|---|---|
+| `-AutoReplyMessage 'Jane has left. Contact finance@contoso.com.'` | Leavers, with `-ConvertMailbox` | Auto-reply on the shared mailbox |
+| `-HideFromGal` | Leavers (cloud: with `-ConvertMailbox`) | Hides from the address list |
+| `-DelegateTo team.lead@contoso.com` | Leavers, with `-ConvertMailbox` | Someone other than the manager gets Full Access |
+| `-NoDelegate` | Leavers, with `-ConvertMailbox` | Nobody gets access |
+| `-KeepLicense` | Leavers | Keeps the licence |
+| `-CsvPath .\joiners.local.csv` | Joiners, instead of the name parameters | Many joiners at once. Columns: GivenName, Surname, Department, JobTitle, Manager |
+| `-SkipLicense` | Joiners | No licence (group-based licensing) |
+| `-ResumeUserPrincipalName jane.doe@contoso.com` | Hybrid joiner, on its own | Finishes usage location and licence after a slow sync |
+| `-IncludeOnPrem` | `Get-StaleAccounts` | Also checks AD last logon |
+| `-IncludeGuests` | `Get-MfaRegistration`, `Get-ManagerCoverage` | Includes guests |
+| `-MinimumRisk Low` | `Get-RiskyAppPermissions` | Shows lower-risk apps too |
 
-# Joiner: finish usage location and licence later, if the sync was slow
-.\Hybrid\New-HybridJoiner.ps1 -ResumeUserPrincipalName jane.doe@contoso.com
-
-# Mover
-.\Hybrid\Move-HybridUser.ps1 -UserPrincipalName jane.doe@contoso.com -Department HR -JobTitle 'HR Assistant' -WhatIf
-
-# Leaver (asks for confirmation once)
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -WhatIf
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -KeepLicense
-
-# Leaver: full offboarding (MFA methods removed, mailbox to shared for the manager, auto-reply, hidden from GAL)
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -RemoveAuthMethods -ConvertMailbox -HideFromGal -AutoReplyMessage 'Jane has left. Please contact finance@contoso.com.' -WhatIf
-
-# Leaver: mailbox to someone other than the manager, or to nobody
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -ConvertMailbox -DelegateTo team.lead@contoso.com -WhatIf
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -ConvertMailbox -NoDelegate -WhatIf
-```
-
-## Cloud (cloud-only users)
-```powershell
-# Joiner
-.\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
-.\Cloud\New-CloudJoiner.ps1 -CsvPath .\joiners.local.csv -WhatIf
-.\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -SkipLicense   # group-based licensing
-
-# Mover
-.\Cloud\Move-CloudUser.ps1 -UserPrincipalName jane.doe@contoso.com -Department HR -JobTitle 'HR Assistant' -WhatIf
-
-# Leaver (asks for confirmation once)
-.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -WhatIf
-.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -RemoveAuthMethods -ConvertMailbox -HideFromGal -AutoReplyMessage 'Jane has left. Please contact finance@contoso.com.' -WhatIf
-.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -ConvertMailbox -DelegateTo team.lead@contoso.com -WhatIf
-```
-
-## What changes per run
-| Script | Change each time |
-|---|---|
-| Joiner | `-GivenName`, `-Surname`, `-Department`, `-JobTitle`, `-Manager`, or `-CsvPath` |
-| Mover | `-UserPrincipalName`, `-Department`, `-JobTitle` (optional) |
-| Leaver | `-UserPrincipalName`, `-Ticket` (hybrid), options: `-RemoveAuthMethods`, `-ConvertMailbox`, `-DelegateTo`, `-NoDelegate`, `-AutoReplyMessage`, `-HideFromGal` |
-
-Tenant, domain, licence, departments, OUs and the sync server live in `config.local.psd1`. Set them once. Never edit a script for a single run.
+Tenant, domain, licence, departments, OUs and the sync server live in `config.local.psd1`. Never edit a script for one run.
 
 ## Habits
-- **Leavers:** use `-ConvertMailbox` if the mailbox has to be kept. Check who gets access in the plan before pressing `Y`: access to a leaver's mailbox usually needs HR approval.
-- **Managers:** set `-Manager` on every joiner. `Get-ManagerCoverage.ps1` shows who is missing one.
+- **Movers:** always give the new manager with `-Manager`. To change only the manager, keep the current department.
+- **Mailbox access:** check who gets it in the leaver plan before pressing `Y`. It usually needs HR approval.
 - **Departments** must match `AllowedDepartments` (cloud) or a key of `DepartmentOUs` (hybrid) exactly.
-- **Temporary passwords** appear once on screen. Pass them on through a one-time secret link, not email or chat.
+- **Temporary passwords** show once. Send them through a one-time secret link, not email or chat.
 - **Output:** CSVs and the log in `output\` contain UPNs. Delete them once reviewed.
 - **Consent prompt:** accept for yourself only. Never tick "Consent on behalf of your organization".
