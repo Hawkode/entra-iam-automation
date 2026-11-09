@@ -137,6 +137,9 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 
+## Cheat sheet
+All commands with example values, ready to copy: [CHEATSHEET.md](CHEATSHEET.md). In a terminal, `Get-Help <script> -Examples` shows the examples for one script.
+
 ## Versioning
 Changes are listed in [CHANGELOG.md](CHANGELOG.md). Use a tagged release, not whatever is on `main` that day, and test it before you rely on it.
 

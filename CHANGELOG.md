@@ -2,6 +2,14 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- `CHEATSHEET.md`: every command with example values, linked from the README.
+
+### Changed
+- Lint workflow: `actions/checkout@v7` (Dependabot).
+
 ## [1.1.0] - 2026-11-08
 
 ### Added
