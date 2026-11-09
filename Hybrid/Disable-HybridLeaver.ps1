@@ -20,7 +20,16 @@
            password hash sync the old password still works there.
       Entra ID
         7. Revoke sign-in sessions.
-        8. Remove cloud-only assigned groups and direct licences.
+        8. Optional: remove MFA / authentication methods (-RemoveAuthMethods).
+        9. Remove cloud-only assigned groups and direct licences.
+
+    Optional -ConvertMailbox runs FIRST, before any AD change, and needs
+    LeaversOUInSyncScope = $true in config: a shared mailbox is tied to its user
+    object, so if the sync deletes the cloud account, the mailbox goes with it.
+    The licence is kept automatically if the shared mailbox still needs one.
+    By default the manager (AD manager attribute) gets Full Access. Access to a
+    leaver's mailbox usually needs HR approval: agree this as policy, or name the
+    person with -DelegateTo, or use -NoDelegate.
 
     If LeaversOU is outside the sync scope, step 6 deletes the cloud account
     (Entra ID Deleted users, 30 days) and soft-deletes its mailbox. The script
@@ -35,6 +44,9 @@
     RoleManagement.ReadWrite.Directory).
 
     Graph scopes (delegated): User.ReadWrite.All, GroupMember.ReadWrite.All, RoleManagement.Read.Directory
+      plus UserAuthenticationMethod.ReadWrite.All with -RemoveAuthMethods (Critical: requested only then)
+    Roles: Authentication Administrator for -RemoveAuthMethods; Exchange Recipient
+      Management for -ConvertMailbox.
     AD rights: disable, reset password, edit and move users in the source OUs and LeaversOU,
     and remove members from their groups. Entra Connect server: WinRM and ADSyncOperators.
 
@@ -42,30 +54,68 @@
     Ticket or request reference, written to the AD description and the CSV.
 
 .PARAMETER KeepLicense
-    Skip licence removal, for example while a mailbox is converted to shared.
+    Skip licence removal.
+
+.PARAMETER RemoveAuthMethods
+    Remove every registered authentication method after the account is disabled in Entra ID.
+
+.PARAMETER ConvertMailbox
+    Convert the mailbox to shared before anything else changes. Needs ExchangeOnlineManagement.
+
+.PARAMETER DelegateTo
+    Who gets Full Access to the shared mailbox. Default: the AD manager.
+
+.PARAMETER NoDelegate
+    Convert without granting anyone access.
+
+.PARAMETER AutoReplyMessage
+    Automatic reply text set on the shared mailbox.
+
+.PARAMETER HideFromGal
+    Hide from the address list. For synced users this is set in AD (msExchHideFromAddressLists),
+    which only exists if the Exchange schema extension is in AD.
 
 .EXAMPLE
     .\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName stefan.ionescu@contoso.com -Ticket INC12345 -WhatIf
+.EXAMPLE
+    .\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName stefan.ionescu@contoso.com -Ticket INC12345 -RemoveAuthMethods -ConvertMailbox -AutoReplyMessage 'Stefan has left. Please contact it@contoso.com.'
 #>
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)][string]$UserPrincipalName,
     [Parameter(Mandatory)][string]$Ticket,
     [switch]$KeepLicense,
+    [switch]$RemoveAuthMethods,
+    [switch]$ConvertMailbox,
+    [string]$DelegateTo,
+    [switch]$NoDelegate,
+    [string]$AutoReplyMessage,
+    [switch]$HideFromGal,
     [int]$SyncTimeoutSeconds = 600
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
 
-$cfg = Import-IamConfig -Require BreakGlassUpns, LeaversOU, EntraConnectServer
+if (($DelegateTo -or $NoDelegate -or $AutoReplyMessage) -and -not $ConvertMailbox) {
+    throw '-DelegateTo, -NoDelegate and -AutoReplyMessage need -ConvertMailbox.'
+}
+if ($DelegateTo -and $NoDelegate) { throw 'Use -DelegateTo or -NoDelegate, not both.' }
+
+$required = @('BreakGlassUpns', 'LeaversOU', 'EntraConnectServer')
+if ($ConvertMailbox) { $required += 'LeaversOUInSyncScope' }
+$cfg = Import-IamConfig -Require $required
+if ($ConvertMailbox -and $cfg.LeaversOUInSyncScope -ne $true) {
+    throw ('LeaversOUInSyncScope is not $true: moving the account to LeaversOU would delete the cloud account and its ' +
+        'shared mailbox. Convert the mailbox by hand and offboard without -ConvertMailbox, or put LeaversOU in the sync scope.')
+}
 $protected = if ($cfg.ProtectedAdGroups) { @($cfg.ProtectedAdGroups) } else { @('Domain Users') }
 if (@($cfg.BreakGlassUpns) -contains $UserPrincipalName) {
     throw "$UserPrincipalName is a break-glass account. The leaver script will not touch it."
 }
 
 Import-IamAdModule
-$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Description, MemberOf, Enabled, adminCount
+$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Description, MemberOf, Enabled, adminCount, Manager
 if (-not $ad) { throw "$UserPrincipalName not found in AD." }
 if ($ad.adminCount -eq 1) {
     throw "$UserPrincipalName is an AD protected account (adminCount = 1). Offboard it by hand with a Tier 0 admin account."
@@ -74,7 +124,9 @@ if ($ad.SamAccountName -eq [Environment]::UserName) { throw 'You are signed in t
 try { $null = Get-ADOrganizationalUnit -Identity $cfg.LeaversOU }
 catch { throw "LeaversOU not found: $($cfg.LeaversOU)" }
 
-Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory'
+$scopes = @('User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
+if ($RemoveAuthMethods) { $scopes += 'UserAuthenticationMethod.ReadWrite.All' }
+Connect-IamGraph -TenantId $cfg.TenantId -Scopes $scopes
 if ((Get-MgContext).Account -eq $UserPrincipalName) {
     throw 'You are signed in to Graph as the account you are trying to offboard. Use a different admin account.'
 }
@@ -103,25 +155,79 @@ foreach ($a in (Get-MgRoleManagementDirectoryRoleAssignment -Filter "principalId
     $manual += "Directory role (remove by hand): $($role.DisplayName)"
 }
 
+$cloudUser = Get-MgUser -UserId $cloud.Id -Property Id, LicenseAssignmentStates, AssignedPlans
+$directLicences = @($cloudUser.LicenseAssignmentStates | Where-Object { -not $_.AssignedByGroup }).Count
+
+$authMethods = @()
+if ($RemoveAuthMethods) { $authMethods = @(Get-IamUserAuthMethod -UserId $cloud.Id) }
+
+$manager = $null
+if ($ConvertMailbox -and -not $DelegateTo -and -not $NoDelegate -and $ad.Manager) {
+    $m = Get-ADUser -Identity $ad.Manager -Properties Enabled, UserPrincipalName
+    $manager = [pscustomobject]@{ UserPrincipalName = $m.UserPrincipalName; AccountEnabled = [bool]$m.Enabled }
+}
+$mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $UserPrincipalName -ConvertMailbox:$ConvertMailbox -DelegateTo $DelegateTo `
+    -NoDelegate:$NoDelegate -Manager $manager -HasExchangePlan (Test-IamExchangePlan -User $cloudUser) `
+    -WillRemoveLicence (-not $KeepLicense -and $directLicences -gt 0)
+$manual += $mbx.Manual
+$keepLicence = $KeepLicense -or $mbx.ForceKeepLicence
+
 $oldDN = $ad.DistinguishedName
 $stamp = 'Leaver {0:yyyy-MM-dd} {1} by {2}' -f (Get-Date), $Ticket, [Environment]::UserName
-$plan = @('AD: disable', 'reset password')
+$plan = @()
+if ($mbx.Convert) {
+    $plan += @($mbx.Lines | ForEach-Object { "Exchange: $_" })
+    if ($AutoReplyMessage) { $plan += 'set automatic reply' }
+}
+$plan += 'AD: disable', 'reset password'
+if ($HideFromGal) { $plan += 'hide from address list (AD)' }
 if ($adGroups.Count) { $plan += "remove from $($adGroups.Count) AD group(s): $($adGroups.Name -join ', ')" }
 $plan += "clear department '$($ad.Department)'", "description '$stamp'", "move to $($cfg.LeaversOU)", 'delta sync'
 $plan += 'Entra: revoke sessions'
+if ($RemoveAuthMethods) {
+    if ($authMethods.Count) { $plan += "remove $($authMethods.Count) authentication method(s): $($authMethods.Type -join ', ')" }
+    else { $plan += 'no authentication methods to remove' }
+}
 if ($cloudGroups.Count) { $plan += "remove from $($cloudGroups.Count) cloud group(s): $($cloudGroups.Name -join ', ')" }
-if ($KeepLicense) { $plan += 'keep licences (-KeepLicense)' } else { $plan += 'remove direct licences' }
+if ($KeepLicense) { $plan += 'keep licences (-KeepLicense)' }
+elseif (-not $mbx.ForceKeepLicence) { $plan += 'remove direct licences' }
 
 Write-IamLog -Message "Leaver plan for ${UserPrincipalName}: $($plan -join '; ')"
 foreach ($item in $manual) { Write-IamLog -Level WARN -Message "Manual follow-up for ${UserPrincipalName}: $item" }
 
 if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) { return }
 
+# ---- Exchange (optional): first, while the cloud account certainly still exists ----
+$mailboxOutcome = ''
+if ($mbx.Convert) {
+    try {
+        Convert-IamMailboxToShared -Identity $UserPrincipalName -DelegateTo $mbx.Delegate -AutoReplyMessage $AutoReplyMessage -Confirm:$false
+        $mailboxOutcome = 'Shared' + $(if ($mbx.Delegate) { "; Full Access: $($mbx.Delegate)" } else { '' })
+    }
+    catch {
+        $keepLicence = $true
+        $mailboxOutcome = 'Conversion failed, licence kept'
+        $manual += 'Mailbox conversion failed: licence kept. Convert by hand, then remove the licence'
+        Write-IamLog -Level ERROR -Message "Mailbox conversion failed for ${UserPrincipalName}: $($_.Exception.Message)"
+    }
+}
+
 # ---- AD ----
 # 1-2. Disable and reset. If either fails, stop.
 Disable-ADAccount -Identity $ad.ObjectGUID
 Set-ADAccountPassword -Identity $ad.ObjectGUID -Reset -NewPassword (ConvertTo-IamSecureString -Text (Get-IamRandomPassword -Length 32))
 Write-IamLog -Message "AD: disabled and password reset: $UserPrincipalName"
+
+if ($HideFromGal) {
+    try {
+        Set-ADUser -Identity $ad.ObjectGUID -Replace @{ msExchHideFromAddressLists = $true }
+        Write-IamLog -Message "AD: hidden from the address list: $UserPrincipalName"
+    }
+    catch {
+        $manual += 'Hide from address list by hand (msExchHideFromAddressLists not available in AD)'
+        Write-IamLog -Level ERROR -Message "AD: could not hide $UserPrincipalName from the address list: $($_.Exception.Message)"
+    }
+}
 
 # 3. AD groups. Carry on past a failure and report it.
 $adRemoved = @()
@@ -149,10 +255,15 @@ $state = Wait-IamCloudUser -UserId $cloud.Id -TimeoutSeconds $SyncTimeoutSeconds
 # ---- Entra ID ----
 $cloudOutcome = ''
 $cloudRemoved = @()
+$authRemoved = @()
 if ($state -eq 'Deleted') {
     $cloudOutcome = 'Deleted by sync (LeaversOU outside sync scope)'
     Write-IamLog -Level WARN -Message ("$UserPrincipalName was deleted from Entra ID by the sync: LeaversOU is outside the sync scope. " +
         'Licences are released and sessions end with the account. Restore window: 30 days in Deleted users.')
+    if ($mbx.Convert) {
+        $manual += 'Shared mailbox was soft-deleted with the account: restore the user within 30 days and set LeaversOUInSyncScope correctly'
+        Write-IamLog -Level ERROR -Message "$UserPrincipalName shared mailbox was soft-deleted with the account. LeaversOUInSyncScope in config is wrong."
+    }
 }
 else {
     if (-not $state) {
@@ -163,6 +274,18 @@ else {
     else { $cloudOutcome = 'Disabled in Entra ID' }
 
     Revoke-IamUserSession -UserId $cloud.Id -Confirm:$false
+
+    if ($RemoveAuthMethods -and $authMethods.Count) {
+        try {
+            $r = Remove-IamUserAuthMethod -UserId $cloud.Id -Confirm:$false
+            $authRemoved = @($r.Removed)
+            $manual += @($r.Failed | ForEach-Object { "Authentication method (remove by hand): $_" })
+        }
+        catch {
+            $manual += 'Authentication methods not removed'
+            Write-IamLog -Level ERROR -Message "Authentication method removal failed for ${UserPrincipalName}: $($_.Exception.Message)"
+        }
+    }
 
     foreach ($g in $cloudGroups) {
         try {
@@ -176,7 +299,7 @@ else {
         }
     }
 
-    if (-not $KeepLicense) {
+    if (-not $keepLicence) {
         try { Remove-IamUserLicense -UserId $cloud.Id -Confirm:$false }
         catch {
             $manual += 'Licence removal failed'
@@ -196,7 +319,9 @@ $csv = Get-IamOutputPath -Prefix 'HybridLeaver'
     AdGroupsRemoved      = ($adRemoved -join '; ')
     CloudOutcome         = $cloudOutcome
     CloudGroupsRemoved   = ($cloudRemoved -join '; ')
-    LicencesKept         = [bool]$KeepLicense
+    LicencesKept         = [bool]$keepLicence
+    AuthMethods          = ($authRemoved -join '; ')
+    Mailbox              = $mailboxOutcome
     ManualFollowUp       = ($manual -join '; ')
 } | Export-Csv -Path $csv -NoTypeInformation
 

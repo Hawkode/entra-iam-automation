@@ -47,4 +47,8 @@
 
     # AD groups the hybrid leaver never removes, and the hybrid mover does not list.
     ProtectedAdGroups    = @('Domain Users')
+
+    # Set to $true only after checking Entra Connect > Domain and OU filtering shows LeaversOU
+    # as synced. The hybrid leaver's -ConvertMailbox refuses to run unless this is $true.
+    LeaversOUInSyncScope = $false
 }

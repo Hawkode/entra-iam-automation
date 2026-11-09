@@ -28,8 +28,12 @@
     Graph scopes (delegated): User.ReadWrite.All, LicenseAssignment.Read.All
     AD rights: create users in the DepartmentOUs. Entra Connect server: WinRM and ADSyncOperators.
 
+.PARAMETER Manager
+    UPN of the new user's manager in AD. Must exist and be enabled. Sets the AD manager
+    attribute, which syncs to Entra ID and which the leaver later uses for the mailbox.
+
 .PARAMETER CsvPath
-    CSV with columns GivenName, Surname, Department, JobTitle (JobTitle optional).
+    CSV with columns GivenName, Surname, Department, JobTitle, Manager (JobTitle and Manager optional).
 
 .PARAMETER ResumeUserPrincipalName
     Synced users that still need usage location and licence. Skips AD and sync.
@@ -39,6 +43,8 @@
 
 .EXAMPLE
     .\Hybrid\New-HybridJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -WhatIf
+.EXAMPLE
+    .\Hybrid\New-HybridJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -Manager grace.miller@contoso.com
 .EXAMPLE
     .\Hybrid\New-HybridJoiner.ps1 -CsvPath .\samples\joiners.example.csv
 .EXAMPLE
@@ -50,6 +56,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Single')][string]$Surname,
     [Parameter(Mandatory, ParameterSetName = 'Single')][string]$Department,
     [Parameter(ParameterSetName = 'Single')][string]$JobTitle,
+    [Parameter(ParameterSetName = 'Single')][string]$Manager,
     [Parameter(Mandatory, ParameterSetName = 'Csv')][string]$CsvPath,
     [Parameter(Mandatory, ParameterSetName = 'Resume')][string[]]$ResumeUserPrincipalName,
     [switch]$SkipLicense,
@@ -81,7 +88,7 @@ if ($PSCmdlet.ParameterSetName -ne 'Resume') {
         $rows = @(Import-Csv -Path $CsvPath -Encoding UTF8)
     }
     else {
-        $rows = @([pscustomobject]@{ GivenName = $GivenName; Surname = $Surname; Department = $Department; JobTitle = $JobTitle })
+        $rows = @([pscustomobject]@{ GivenName = $GivenName; Surname = $Surname; Department = $Department; JobTitle = $JobTitle; Manager = $Manager })
     }
     if ($rows.Count -eq 0) { throw 'No joiners to process.' }
 
@@ -110,6 +117,8 @@ if ($PSCmdlet.ParameterSetName -ne 'Resume') {
             DisplayName = "$gn $sn"
             Department  = $dept
             JobTitle    = "$($r.JobTitle)".Trim()
+            Manager     = "$($r.Manager)".Trim()
+            ManagerDN   = $null
             Sam         = $sam
             Upn         = "$nick@$domain"
             OU          = $deptOUs[$dept]
@@ -120,6 +129,15 @@ if ($PSCmdlet.ParameterSetName -ne 'Resume') {
         $dupes = @($plan | Group-Object -Property $prop | Where-Object { $_.Count -gt 1 })
         if ($dupes) { throw "Duplicate $prop in input: $($dupes.Name -join ', ')" }
     }
+
+    $managerDNs = @{}
+    foreach ($mUpn in @($plan.Manager | Where-Object { $_ } | Sort-Object -Unique)) {
+        $mAd = Get-ADUser -Filter "UserPrincipalName -eq '$mUpn'" -Properties Enabled
+        if (-not $mAd) { throw "Manager $mUpn not found in AD. Nothing was created." }
+        if (-not $mAd.Enabled) { throw "Manager $mUpn is disabled in AD. Nothing was created." }
+        $managerDNs[$mUpn] = $mAd.DistinguishedName
+    }
+    foreach ($p in $plan) { if ($p.Manager) { $p.ManagerDN = $managerDNs[$p.Manager] } }
 
     foreach ($p in $plan) {
         try { $null = Get-ADOrganizationalUnit -Identity $p.OU }
@@ -157,6 +175,7 @@ $created = @()
 foreach ($p in $plan) {
     $action = "Create AD user in $($p.OU) ($($p.Department)), sync, set usage location"
     if ($skuId) { $action += ", assign $($cfg.LicenseSkuPartNumber)" }
+    if ($p.Manager) { $action += ", manager $($p.Manager)" }
     if (-not $PSCmdlet.ShouldProcess($p.Upn, $action)) { continue }
 
     $password = Get-IamRandomPassword
@@ -174,6 +193,7 @@ foreach ($p in $plan) {
         ChangePasswordAtLogon = $true
     }
     if ($p.JobTitle) { $adParams.Title = $p.JobTitle }
+    if ($p.ManagerDN) { $adParams.Manager = $p.ManagerDN }
     New-ADUser @adParams
     Write-IamLog -Message "Created AD user $($p.Upn) (sAMAccountName $($p.Sam)) in $($p.OU)"
     $created += [pscustomobject]@{ Upn = $p.Upn; DisplayName = $p.DisplayName; Department = $p.Department; TempPassword = $password }

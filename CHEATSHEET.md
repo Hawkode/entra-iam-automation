@@ -12,7 +12,7 @@ Per-script help with more examples: `Get-Help .\Hybrid\Disable-HybridLeaver.ps1 
 
 ## Setup (once)
 ```powershell
-git clone --branch v1.1.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+git clone --branch v1.2.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
 cd C:\Tools\entra-iam-automation
 Copy-Item config.example.psd1 config.local.psd1   # then replace every example value
 ```
@@ -24,15 +24,17 @@ Copy-Item config.example.psd1 config.local.psd1   # then replace every example v
 .\Reports\Get-StandingAdmins.ps1 -PrivilegedOnly
 .\Reports\Get-StaleAccounts.ps1 -StaleDays 90
 .\Reports\Get-StaleAccounts.ps1 -StaleDays 90 -IncludeOnPrem   # hybrid: also checks AD lastLogonTimestamp
+.\Reports\Get-MfaRegistration.ps1                                # needs P1
+.\Reports\Get-ManagerCoverage.ps1
 ```
 
 ## Hybrid (users synced from AD DS)
 ```powershell
-# Joiner: one user
-.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -WhatIf
-.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant'
+# Joiner: one user, with manager
+.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
+.\Hybrid\New-HybridJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com
 
-# Joiner: a list (columns GivenName, Surname, Department, JobTitle). Name real lists *.local.csv so git ignores them.
+# Joiner: a list (columns GivenName, Surname, Department, JobTitle, Manager). Name real lists *.local.csv so git ignores them.
 .\Hybrid\New-HybridJoiner.ps1 -CsvPath .\joiners.local.csv -WhatIf
 
 # Joiner: finish usage location and licence later, if the sync was slow
@@ -44,13 +46,20 @@ Copy-Item config.example.psd1 config.local.psd1   # then replace every example v
 # Leaver (asks for confirmation once)
 .\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -WhatIf
 .\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345
-.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -KeepLicense   # mailbox still being converted
+.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -KeepLicense
+
+# Leaver: full offboarding (MFA methods removed, mailbox to shared for the manager, auto-reply, hidden from GAL)
+.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -RemoveAuthMethods -ConvertMailbox -HideFromGal -AutoReplyMessage 'Jane has left. Please contact finance@contoso.com.' -WhatIf
+
+# Leaver: mailbox to someone other than the manager, or to nobody
+.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -ConvertMailbox -DelegateTo team.lead@contoso.com -WhatIf
+.\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -Ticket INC12345 -ConvertMailbox -NoDelegate -WhatIf
 ```
 
 ## Cloud (cloud-only users)
 ```powershell
 # Joiner
-.\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -WhatIf
+.\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -JobTitle 'Accounts Assistant' -Manager john.smith@contoso.com -WhatIf
 .\Cloud\New-CloudJoiner.ps1 -CsvPath .\joiners.local.csv -WhatIf
 .\Cloud\New-CloudJoiner.ps1 -GivenName Jane -Surname Doe -Department Finance -SkipLicense   # group-based licensing
 
@@ -59,20 +68,22 @@ Copy-Item config.example.psd1 config.local.psd1   # then replace every example v
 
 # Leaver (asks for confirmation once)
 .\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -WhatIf
-.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -KeepLicense
+.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -RemoveAuthMethods -ConvertMailbox -HideFromGal -AutoReplyMessage 'Jane has left. Please contact finance@contoso.com.' -WhatIf
+.\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName jane.doe@contoso.com -ConvertMailbox -DelegateTo team.lead@contoso.com -WhatIf
 ```
 
 ## What changes per run
 | Script | Change each time |
 |---|---|
-| Joiner | `-GivenName`, `-Surname`, `-Department`, `-JobTitle`, or `-CsvPath` |
+| Joiner | `-GivenName`, `-Surname`, `-Department`, `-JobTitle`, `-Manager`, or `-CsvPath` |
 | Mover | `-UserPrincipalName`, `-Department`, `-JobTitle` (optional) |
-| Leaver | `-UserPrincipalName`, `-Ticket` (hybrid) |
+| Leaver | `-UserPrincipalName`, `-Ticket` (hybrid), options: `-RemoveAuthMethods`, `-ConvertMailbox`, `-DelegateTo`, `-NoDelegate`, `-AutoReplyMessage`, `-HideFromGal` |
 
 Tenant, domain, licence, departments, OUs and the sync server live in `config.local.psd1`. Set them once. Never edit a script for a single run.
 
 ## Habits
-- **Leavers:** convert the mailbox to shared **before** running the leaver if it has to be kept.
+- **Leavers:** use `-ConvertMailbox` if the mailbox has to be kept. Check who gets access in the plan before pressing `Y`: access to a leaver's mailbox usually needs HR approval.
+- **Managers:** set `-Manager` on every joiner. `Get-ManagerCoverage.ps1` shows who is missing one.
 - **Departments** must match `AllowedDepartments` (cloud) or a key of `DepartmentOUs` (hybrid) exactly.
 - **Temporary passwords** appear once on screen. Pass them on through a one-time secret link, not email or chat.
 - **Output:** CSVs and the log in `output\` contain UPNs. Delete them once reviewed.

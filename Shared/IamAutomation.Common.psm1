@@ -215,6 +215,287 @@ function Wait-IamCloudUser {
     }
 }
 
+# ---- Authentication methods ----
+
+$script:AuthMethodSegments = @{
+    '#microsoft.graph.microsoftAuthenticatorAuthenticationMethod' = 'microsoftAuthenticatorMethods'
+    '#microsoft.graph.phoneAuthenticationMethod'                  = 'phoneMethods'
+    '#microsoft.graph.fido2AuthenticationMethod'                  = 'fido2Methods'
+    '#microsoft.graph.softwareOathAuthenticationMethod'           = 'softwareOathMethods'
+    '#microsoft.graph.temporaryAccessPassAuthenticationMethod'    = 'temporaryAccessPassMethods'
+    '#microsoft.graph.windowsHelloForBusinessAuthenticationMethod' = 'windowsHelloForBusinessMethods'
+    '#microsoft.graph.emailAuthenticationMethod'                  = 'emailMethods'
+    '#microsoft.graph.platformCredentialAuthenticationMethod'     = 'platformCredentialMethods'
+}
+
+function Get-IamUserAuthMethod {
+    <#
+    .SYNOPSIS
+        Lists a user's registered authentication methods, except the password.
+        Needs UserAuthenticationMethod.Read.All (or ReadWrite.All).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$UserId)
+    $resp = Invoke-MgGraphRequest -Method GET -Uri "v1.0/users/$UserId/authentication/methods" -ErrorAction Stop
+    foreach ($m in @($resp.value)) {
+        $type = $m.'@odata.type'
+        if ($type -eq '#microsoft.graph.passwordAuthenticationMethod') { continue }
+        [pscustomobject]@{
+            Id      = $m.id
+            Type    = $type -replace '^#microsoft\.graph\.', '' -replace 'AuthenticationMethod$', ''
+            Segment = $script:AuthMethodSegments[$type]
+        }
+    }
+}
+
+function Remove-IamUserAuthMethod {
+    <#
+    .SYNOPSIS
+        Removes every registered authentication method except the password.
+    .DESCRIPTION
+        Graph refuses to delete the default method while other methods exist, so this runs
+        two passes: everything it can, then whatever failed (usually the default, now alone).
+        Returns the removed and failed method types.
+        Needs UserAuthenticationMethod.ReadWrite.All and Authentication Administrator.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)][string]$UserId)
+    $methods = @(Get-IamUserAuthMethod -UserId $UserId)
+    $removed = @()
+    $failed = @()
+    if ($methods.Count -eq 0) {
+        Write-IamLog -Message "No authentication methods to remove: $UserId"
+        return [pscustomobject]@{ Removed = $removed; Failed = $failed }
+    }
+    if (-not $PSCmdlet.ShouldProcess($UserId, "Remove $($methods.Count) authentication method(s)")) { return }
+
+    $pending = @($methods | Where-Object { $_.Segment })
+    $failed += @($methods | Where-Object { -not $_.Segment } | ForEach-Object { "$($_.Type) (unsupported type)" })
+    for ($pass = 1; $pass -le 2 -and $pending.Count; $pass++) {
+        $retry = @()
+        foreach ($m in $pending) {
+            try {
+                Invoke-MgGraphRequest -Method DELETE -Uri "v1.0/users/$UserId/authentication/$($m.Segment)/$($m.Id)" -ErrorAction Stop | Out-Null
+                $removed += $m.Type
+            }
+            catch {
+                if ($pass -eq 1) { $retry += $m }
+                else { $failed += "$($m.Type) ($($_.Exception.Message))" }
+            }
+        }
+        $pending = $retry
+    }
+    Write-IamLog -Message "Authentication methods removed for ${UserId}: $($removed.Count) ($($removed -join ', '))"
+    foreach ($f in $failed) { Write-IamLog -Level WARN -Message "Authentication method not removed for ${UserId}: $f" }
+    [pscustomobject]@{ Removed = $removed; Failed = $failed }
+}
+
+# ---- Exchange Online ----
+
+function Connect-IamExchange {
+    <#
+    .SYNOPSIS
+        Connects to Exchange Online (ExchangeOnlineManagement module), reusing an open session.
+        Least-privilege role for the mailbox steps: Recipient Management.
+    #>
+    [CmdletBinding()]
+    param()
+    if (-not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)) {
+        throw 'ExchangeOnlineManagement module not found. Run: Install-Module ExchangeOnlineManagement -Scope CurrentUser'
+    }
+    Import-Module ExchangeOnlineManagement -ErrorAction Stop -Verbose:$false
+    $open = @(Get-ConnectionInformation -ErrorAction SilentlyContinue | Where-Object { $_.State -eq 'Connected' })
+    if ($open.Count -eq 0) {
+        Connect-ExchangeOnline -ShowBanner:$false -ErrorAction Stop
+        $open = @(Get-ConnectionInformation | Where-Object { $_.State -eq 'Connected' })
+    }
+    Write-IamLog -Message "Exchange Online connected as $($open[0].UserPrincipalName)"
+}
+
+function Get-IamMailboxState {
+    <#
+    .SYNOPSIS
+        Reads what the leaver needs to know about a mailbox before converting it.
+    .DESCRIPTION
+        NeedsLicence is true when a shared mailbox would still need a licence:
+        over 50 GB, litigation hold, or an active archive. Removing the licence then
+        would put the mailbox at risk, so the leaver keeps it.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Identity)
+    $mbx = Get-EXOMailbox -Identity $Identity -Properties RecipientTypeDetails, LitigationHoldEnabled, ArchiveStatus -ErrorAction SilentlyContinue
+    if (-not $mbx) { return [pscustomobject]@{ Exists = $false } }
+    $stats = Get-EXOMailboxStatistics -Identity $Identity -ErrorAction SilentlyContinue
+    $bytes = 0
+    if ($stats -and "$($stats.TotalItemSize)" -match '\(([\d,]+) bytes\)') { $bytes = [int64]($Matches[1] -replace ',', '') }
+    $sizeGB = [math]::Round($bytes / 1GB, 2)
+    $reasons = @()
+    if ($sizeGB -ge 50) { $reasons += "over 50 GB ($sizeGB GB)" }
+    if ($mbx.LitigationHoldEnabled) { $reasons += 'litigation hold' }
+    if ($mbx.ArchiveStatus -eq 'Active') { $reasons += 'archive enabled' }
+    [pscustomobject]@{
+        Exists         = $true
+        Type           = "$($mbx.RecipientTypeDetails)"
+        SizeGB         = $sizeGB
+        NeedsLicence   = [bool]$reasons.Count
+        LicenceReasons = $reasons -join ', '
+    }
+}
+
+function Convert-IamMailboxToShared {
+    <#
+    .SYNOPSIS
+        Converts a user mailbox to shared, then optionally grants Full Access,
+        sets an automatic reply and hides it from the address list.
+    .DESCRIPTION
+        -HideFromGal only works for cloud-only users. For synced users the setting
+        belongs to AD (msExchHideFromAddressLists).
+        With an on-prem Exchange server still used for management, also run
+        Set-RemoteMailbox -Type Shared on-prem.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param(
+        [Parameter(Mandatory)][string]$Identity,
+        [string]$DelegateTo,
+        [string]$AutoReplyMessage,
+        [switch]$HideFromGal,
+        [int]$TimeoutSeconds = 120
+    )
+    if (-not $PSCmdlet.ShouldProcess($Identity, 'Convert mailbox to shared')) { return }
+    $current = Get-EXOMailbox -Identity $Identity -Properties RecipientTypeDetails -ErrorAction Stop
+    if ("$($current.RecipientTypeDetails)" -ne 'SharedMailbox') {
+        Set-Mailbox -Identity $Identity -Type Shared -ErrorAction Stop
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        do {
+            Start-Sleep -Seconds 10
+            $current = Get-EXOMailbox -Identity $Identity -Properties RecipientTypeDetails -ErrorAction Stop
+        } until ("$($current.RecipientTypeDetails)" -eq 'SharedMailbox' -or (Get-Date) -gt $deadline)
+        if ("$($current.RecipientTypeDetails)" -ne 'SharedMailbox') {
+            throw "Mailbox for $Identity did not show as shared within $TimeoutSeconds seconds. Licence not removed. Check it, then remove the licence by hand."
+        }
+    }
+    Write-IamLog -Message "Mailbox converted to shared: $Identity"
+    if ($DelegateTo) {
+        Add-MailboxPermission -Identity $Identity -User $DelegateTo -AccessRights FullAccess -InheritanceType All -AutoMapping $true -ErrorAction Stop | Out-Null
+        Write-IamLog -Message "Full Access on $Identity granted to $DelegateTo"
+    }
+    if ($AutoReplyMessage) {
+        Set-MailboxAutoReplyConfiguration -Identity $Identity -AutoReplyState Enabled -InternalMessage $AutoReplyMessage `
+            -ExternalMessage $AutoReplyMessage -ExternalAudience All -ErrorAction Stop
+        Write-IamLog -Message "Automatic reply set on $Identity"
+    }
+    if ($HideFromGal) {
+        Set-Mailbox -Identity $Identity -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+        Write-IamLog -Message "Hidden from the address list: $Identity"
+    }
+}
+
+# ---- Manager ----
+
+function Get-IamCloudManager {
+    <#
+    .SYNOPSIS
+        Returns the user's manager from Entra ID (Id, UserPrincipalName, AccountEnabled), or $null.
+        Needs User.Read.All.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$UserId)
+    try {
+        $m = Invoke-MgGraphRequest -Method GET -Uri "v1.0/users/$UserId/manager?`$select=id,userPrincipalName,accountEnabled" -ErrorAction Stop
+    }
+    catch {
+        if ($_.Exception.Message -match 'Request_ResourceNotFound|does not exist|NotFound|404') { return $null }
+        throw
+    }
+    [pscustomobject]@{ Id = $m.id; UserPrincipalName = $m.userPrincipalName; AccountEnabled = $m.accountEnabled }
+}
+
+function Test-IamExchangePlan {
+    # True if the user's assigned plans include an enabled Exchange Online service plan
+    # (so licence removal would start the mailbox deletion clock). Pass a user with AssignedPlans.
+    param([Parameter(Mandatory)]$User)
+    [bool](@($User.AssignedPlans) | Where-Object { $_.Service -eq 'exchange' -and $_.CapabilityStatus -eq 'Enabled' })
+}
+
+function Resolve-IamDelegate {
+    <#
+    .SYNOPSIS
+        Picks who gets Full Access to a leaver's shared mailbox and returns a plan line.
+    .DESCRIPTION
+        -DelegateTo wins. Otherwise the manager passed in. A disabled or missing delegate
+        returns $null with the reason, so the leaver delegates nothing and lists a manual item.
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$DelegateTo,
+        $Manager
+    )
+    if ($DelegateTo) {
+        $u = $null
+        try { $u = Get-MgUser -UserId $DelegateTo -Property Id, UserPrincipalName, AccountEnabled -ErrorAction Stop } catch { $u = $null }
+        if (-not $u) { throw "-DelegateTo $DelegateTo not found in Entra ID." }
+        if (-not $u.AccountEnabled) { throw "-DelegateTo $DelegateTo is disabled. Choose someone else." }
+        return [pscustomobject]@{ Upn = $u.UserPrincipalName; Source = 'DelegateTo'; Problem = $null }
+    }
+    if (-not $Manager) { return [pscustomobject]@{ Upn = $null; Source = 'Manager'; Problem = 'No manager set' } }
+    if (-not $Manager.AccountEnabled) {
+        return [pscustomobject]@{ Upn = $null; Source = 'Manager'; Problem = "Manager $($Manager.UserPrincipalName) is disabled" }
+    }
+    [pscustomobject]@{ Upn = $Manager.UserPrincipalName; Source = 'Manager'; Problem = $null }
+}
+
+function Get-IamLeaverMailboxPlan {
+    <#
+    .SYNOPSIS
+        Works out the mailbox part of a leaver plan: convert or not, who gets Full Access,
+        and whether the licence has to stay. Read-only; connects to Exchange Online if needed.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$UserPrincipalName,
+        [switch]$ConvertMailbox,
+        [string]$DelegateTo,
+        [switch]$NoDelegate,
+        $Manager,
+        [bool]$HasExchangePlan,
+        [bool]$WillRemoveLicence
+    )
+    $plan = [pscustomobject]@{
+        Lines = @(); Manual = @(); Convert = $false; Delegate = $null; ForceKeepLicence = $false; SizeGB = $null
+    }
+    if (-not $ConvertMailbox) {
+        if ($HasExchangePlan -and $WillRemoveLicence) {
+            $plan.Manual += 'Mailbox not converted: it is deleted 30 days after the licence goes. Use -ConvertMailbox or -KeepLicense if it must be kept'
+        }
+        return $plan
+    }
+    Connect-IamExchange
+    $state = Get-IamMailboxState -Identity $UserPrincipalName
+    if (-not $state.Exists) {
+        $plan.Manual += 'No Exchange Online mailbox found: nothing to convert'
+        return $plan
+    }
+    $plan.Convert = $true
+    $plan.SizeGB = $state.SizeGB
+    if ($state.Type -eq 'SharedMailbox') { $plan.Lines += 'mailbox already shared' }
+    else { $plan.Lines += "convert mailbox to shared ($($state.SizeGB) GB)" }
+    if ($NoDelegate) { $plan.Lines += 'no Full Access (-NoDelegate)' }
+    else {
+        $d = Resolve-IamDelegate -DelegateTo $DelegateTo -Manager $Manager
+        if ($d.Upn) {
+            $plan.Delegate = $d.Upn
+            $how = if ($d.Source -eq 'Manager') { 'manager' } else { '-DelegateTo' }
+            $plan.Lines += "Full Access to $($d.Upn) ($how)"
+        }
+        else { $plan.Manual += "$($d.Problem): grant mailbox access by hand, or rerun with -DelegateTo" }
+    }
+    if ($state.NeedsLicence) {
+        $plan.ForceKeepLicence = $true
+        $plan.Lines += "keep licence: the shared mailbox still needs one ($($state.LicenceReasons))"
+    }
+    $plan
+}
+
 function Connect-IamGraph {
     [CmdletBinding()]
     param(
@@ -265,4 +546,6 @@ function Remove-IamUserLicense {
 
 Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
-    Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense
+    Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
+    Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
+    Resolve-IamDelegate, Get-IamLeaverMailboxPlan
