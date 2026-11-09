@@ -2,6 +2,16 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-09
+
+### Added
+- Movers (cloud and hybrid): `-Manager` sets the new manager, validated before any change. Pass the current department to change only the manager.
+- Movers: a warning when the department changes but the manager stays, the user has no manager, or the manager is disabled. The leavers hand the mailbox to the manager, so a stale one gets the wrong mailbox.
+
+### Changed
+- `CHEATSHEET.md`: one line per job, rarer options in one Extras table.
+- README status: `Get-MfaRegistration` and `Get-ManagerCoverage` tested in the lab.
+
 ## [1.2.0] - 2026-11-09
 
 New options and reports are tested offline with Graph, Exchange Online and AD mocked, not yet in a live tenant.
