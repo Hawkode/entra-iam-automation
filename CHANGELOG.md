@@ -2,6 +2,17 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-11-10
+
+Access review campaigns, tested in the lab tenant. Returned files saved by Excel, `-AllAssignedGroups` and `-IncludeSignIn` not yet tested live.
+
+### Added
+- `Governance/Get-AccessReviewExtract.ps1`: access review campaign extract, one CSV per group owner with a Keep/Revoke column and flags (disabled, guest, outside the group's main department, nested group, inactive with `-IncludeSignIn`). Ownerless groups and self-review rows go to the fallback reviewer.
+- `Governance/Invoke-AccessReviewDecisions.ps1`: validates returned files against the extract, removes Revoke rows after one confirmation, writes evidence and a per-reviewer summary. `-StatusOnly` reports completion without signing in.
+- Access review extract flags external accounts with user type Member (`#EXT#` in the UPN), which a guest-only check misses.
+- Config key `ReviewFallbackUpn`.
+- Shared module: `Get-IamOutputFolder`, `Export-IamCsv` (UTF-8 with BOM for Excel), `Invoke-IamGraphGetAll` (paged GET).
+
 ## [1.2.2] - 2026-11-09
 
 Tidy-up. No new features.

@@ -12,6 +12,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Cloud/` | Joiner, mover, leaver for cloud-only users |
 | `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
+| `Governance/` | Access review campaigns: extract per reviewer, then apply the decisions with evidence |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
 
@@ -20,13 +21,13 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - Microsoft Graph PowerShell SDK: `Install-Module Microsoft.Graph -Scope CurrentUser`
 - For the leavers' `-ConvertMailbox` only: `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
-- Licences: lifecycle scripts, `Get-RiskyAppPermissions` and `Get-ManagerCoverage` work on Entra ID Free. `Get-StaleAccounts` and `Get-MfaRegistration` need P1. PIM data in `Get-StandingAdmins` needs P2.
+- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.2.2` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.3.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.2.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.3.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
@@ -66,6 +67,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `LeaversOU` | Hybrid leaver | OU for disabled leavers. Check its sync scope first (see below) |
 | `EntraConnectServer` | Hybrid | Active Entra Connect server (not staging) |
 | `ProtectedAdGroups` | Hybrid leaver, mover | AD groups never removed or listed. Default `Domain Users` |
+| `ReviewFallbackUpn` | Access review extract | Reviewer for groups with no enabled owner, and for rows where the owner would review their own access |
 | `LeaversOUInSyncScope` | Hybrid leaver with `-ConvertMailbox` | `$true` only after checking that `LeaversOU` is inside the Entra Connect sync scope (see below) |
 
 ## Cloud lifecycle
@@ -134,6 +136,34 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 | `Get-MfaRegistration.ps1` | Users with no MFA, only weak methods (SMS, voice, email), admins and break-glass accounts without a phishing-resistant method | `AuditLog.Read.All` (role: Reports Reader) | P1 or P2 |
 | `Get-ManagerCoverage.ps1` | Enabled users with no manager or a disabled manager. The leavers' mailbox handover depends on it | `User.Read.All` | Free |
 
+## Access reviews
+A quarterly recertification without Entra ID P2: each group owner gets a CSV of who is in their groups, marks each row Keep or Revoke, and sends it back. The second script checks the returned files and applies the decisions.
+
+| Script | Does | Graph scopes |
+|---|---|---|
+| `Get-AccessReviewExtract.ps1` | One CSV per reviewer (the group's first enabled owner), with flags: disabled, guest or external, outside the group's main department, nested group, inactive (`-IncludeSignIn`). Plus `_master.csv`, the reference copy | `GroupMember.Read.All`, `User.Read.All` (+ `AuditLog.Read.All` with `-IncludeSignIn`) |
+| `Invoke-AccessReviewDecisions.ps1` | Validates the returned files, removes the Revoke rows, writes `_evidence-*.csv` and `_summary-*.csv`. `-StatusOnly` shows completion per reviewer without signing in | `GroupMember.ReadWrite.All` |
+
+**Running a campaign**
+1. Extract: `.\Governance\Get-AccessReviewExtract.ps1 -GroupName 'Finance Share', 'Payroll App' -Campaign Q4-2026`
+2. Send each `<reviewer>.csv` from `output\AccessReview-Q4-2026\` to its reviewer with a deadline. Keep `_master.csv` to yourself.
+3. Save each returned file over the original, same name. Check progress with `-StatusOnly`.
+4. Apply: run with `-Ticket` and `-WhatIf`, read the plan, then run again without `-WhatIf`.
+5. File the evidence and summary CSVs with the reviewers' replies, under the ticket.
+
+**Controls built in**
+- **No self-review:** a row where the owner is the member goes to `ReviewFallbackUpn`. So does every group with no enabled owner, and the log lists those groups as findings.
+- **Validate first:** every returned row must match `_master.csv`: same reviewer file, same GroupId and MemberId, no duplicates, decision Keep, Revoke or empty. One problem and nothing changes. The problems go to `_validation-*.csv`.
+- **Justified exceptions:** Keep on a flagged row needs a Reason.
+- **Fresh data only:** an extract older than 30 days is refused (`-MaxExtractAgeDays`).
+- **Not automatic:** unreviewed rows are reported, never removed. Break-glass accounts, your own access, and rows in role-assignable, AD-synced or mail-enabled security groups are listed for manual action.
+- **Rerun-safe:** membership is re-read before removal, so access already removed counts as done.
+
+**Limits**
+- Groups only. Dynamic groups are skipped (fix the attribute instead), distribution groups too. Directory roles: use `Get-StandingAdmins`.
+- A CSV cannot prove who edited it. The evidence records which file each decision came from: keep the reviewer's reply as proof of who decided. This is the gap a governance tool such as Entra ID Governance closes.
+- Excel: save returned files as CSV with the same name. Do not open `_master.csv` in Excel and save it.
+
 ## Output and logs
 Every script writes a timestamped CSV to `output/` and appends to `output/iam-automation.log`. Both contain UPNs: `output/` is gitignored, keep the folder out of OneDrive and other synced folders, and delete old files once they have served their purpose.
 
@@ -154,6 +184,8 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` untested |
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
+| Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
+| Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence). Returned files saved by Excel untested |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licences, `-RemoveAuthMethods` and `-ConvertMailbox` tested offline only |

@@ -70,6 +70,49 @@ function Get-IamOutputPath {
     Join-Path -Path $outDir -ChildPath ('{0}-{1:yyyyMMdd-HHmmss}.csv' -f $Prefix, (Get-Date))
 }
 
+function Get-IamOutputFolder {
+    <#
+    .SYNOPSIS
+        Returns a folder under the repo's output folder (gitignored) and creates it.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name)
+    if ($Name -match '[\\/:*?"<>|]' -or $Name -match '^\.') { throw "Folder name '$Name' has characters Windows does not allow." }
+    $dir = Join-Path -Path (Join-Path -Path $script:RepoRoot -ChildPath 'output') -ChildPath $Name
+    if (-not (Test-Path -Path $dir)) { New-Item -ItemType Directory -Path $dir -Force -WhatIf:$false | Out-Null }
+    $dir
+}
+
+function Export-IamCsv {
+    <#
+    .SYNOPSIS
+        Writes a CSV as UTF-8 with a byte order mark, so Excel shows accented names correctly
+        in Windows PowerShell 5.1 and PowerShell 7 alike.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
+        [Parameter(Mandatory)][string]$Path
+    )
+    $encoding = if ($PSVersionTable.PSVersion.Major -ge 6) { 'utf8BOM' } else { 'UTF8' }
+    $InputObject | Export-Csv -Path $Path -NoTypeInformation -Encoding $encoding -WhatIf:$false
+}
+
+function Invoke-IamGraphGetAll {
+    <#
+    .SYNOPSIS
+        GET a Graph collection and follow @odata.nextLink until the last page. Returns the items.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri)
+    $next = $Uri
+    while ($next) {
+        $resp = Invoke-MgGraphRequest -Method GET -Uri $next -ErrorAction Stop
+        foreach ($item in @($resp.value)) { $item }
+        $next = $resp.'@odata.nextLink'
+    }
+}
+
 function ConvertTo-IamUpnPart {
     # Strip accents (S-comma to S, a-breve to a), then keep only a-z, 0-9 and hyphen.
     param([Parameter(Mandatory)][string]$Text)
@@ -677,4 +720,4 @@ Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath,
     Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
-    Write-IamManagerWarning
+    Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll

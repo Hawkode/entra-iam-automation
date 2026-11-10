@@ -26,6 +26,10 @@
     # without phishing-resistant MFA, the other reports mark them as expected.
     BreakGlassUpns       = @('breakglass@contoso.onmicrosoft.com')
 
+    # Access reviews: who reviews a group with no enabled owner, and rows where the owner
+    # would be reviewing their own access. Usually the IAM or IT security lead.
+    ReviewFallbackUpn    = 'iam.lead@contoso.onmicrosoft.com'
+
     # Exact department names your dynamic groups key on. Joiner and mover reject anything else.
     AllowedDepartments   = @('HR', 'IT', 'Engineering', 'Customer Support', 'Warehouse', 'Finance')
 

@@ -10,7 +10,7 @@ Run from the repo folder, signed in with an admin account.
 
 ## Setup (once)
 ```powershell
-git clone --branch v1.2.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+git clone --branch v1.3.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
 cd C:\Tools\entra-iam-automation
 Copy-Item config.example.psd1 config.local.psd1   # then replace every example value
 ```
@@ -38,6 +38,13 @@ Copy-Item config.example.psd1 config.local.psd1   # then replace every example v
 .\Reports\Get-ManagerCoverage.ps1
 ```
 
+## Access review (quarterly)
+```powershell
+.\Governance\Get-AccessReviewExtract.ps1 -GroupName 'Finance Share', 'Payroll App' -Campaign Q4-2026
+.\Governance\Invoke-AccessReviewDecisions.ps1 -Campaign Q4-2026 -StatusOnly
+.\Governance\Invoke-AccessReviewDecisions.ps1 -Campaign Q4-2026 -Ticket CHG12345 -WhatIf
+```
+
 ## Extras
 Add to the lines above when needed.
 
@@ -54,6 +61,8 @@ Add to the lines above when needed.
 | `-IncludeOnPrem` | `Get-StaleAccounts` | Also checks AD last logon |
 | `-IncludeGuests` | `Get-MfaRegistration`, `Get-ManagerCoverage` | Includes guests |
 | `-MinimumRisk Low` | `Get-RiskyAppPermissions` | Shows lower-risk apps too |
+| `-AllAssignedGroups` | `Get-AccessReviewExtract`, instead of `-GroupName` | Every assigned security and Microsoft 365 group |
+| `-IncludeSignIn` | `Get-AccessReviewExtract` | Last sign-in and inactive flag (P1) |
 
 Tenant, domain, licence, departments, OUs and the sync server live in `config.local.psd1`. Never edit a script for one run.
 
