@@ -1,12 +1,12 @@
-name: lint
+name: ci
 on: [push, pull_request]
 
-# The job only reads the code. Keep the workflow token read-only.
+# The jobs only read the code. Keep the workflow token read-only.
 permissions:
   contents: read
 
 jobs:
-  psscriptanalyzer:
+  lint:
     runs-on: ubuntu-latest
     # A healthy run takes about a minute. Stop a hung run instead of waiting for the 6-hour default.
     timeout-minutes: 10
@@ -25,3 +25,21 @@ jobs:
           $r = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Warning, Error -ExcludeRule PSMissingModuleManifestField
           $r | Format-Table -AutoSize
           if ($r) { exit 1 }
+
+  test:
+    # The scripts support Windows PowerShell 5.1 and PowerShell 7, so the tests run in both.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Executable to run the tests with. "shell:" cannot take a matrix
+        # expression, so the step always starts in pwsh and launches this.
+        edition: [powershell, pwsh]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run Pester (${{ matrix.edition }})
+        shell: pwsh
+        run: ${{ matrix.edition }} -NoProfile -NonInteractive -File ./build/Invoke-Tests.ps1

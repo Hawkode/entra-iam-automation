@@ -1,6 +1,6 @@
 # Entra IAM Automation
 
-[![lint](https://github.com/Hawkode/entra-iam-automation/actions/workflows/lint.yml/badge.svg)](https://github.com/Hawkode/entra-iam-automation/actions/workflows/lint.yml)
+[![ci](https://github.com/Hawkode/entra-iam-automation/actions/workflows/ci.yml/badge.svg)](https://github.com/Hawkode/entra-iam-automation/actions/workflows/ci.yml)
 
 PowerShell (Microsoft Graph SDK) scripts for identity lifecycle and security reporting in Microsoft Entra ID.
 Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/entra-iam-lab/).
@@ -192,6 +192,14 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD, Graph and Exchange mocked. Not yet tested against a real domain |
+
+## Tests
+[`tests/IamAutomation.Common.Tests.ps1`](tests/IamAutomation.Common.Tests.ps1) covers the shared module with Pester 5: UPN building and accent stripping, password generation, config validation, output files, the leaver mailbox plan, the cloud and hybrid sync-state guard, and the retry when Graph refuses to delete the default MFA method. Graph and Exchange calls are mocked, so the tests need no tenant. CI runs them on Windows PowerShell 5.1 and PowerShell 7, after PSScriptAnalyzer.
+
+Run them locally (installs Pester 5.9.1 for the current user):
+```powershell
+powershell.exe -NoProfile -File .\build\Invoke-Tests.ps1
+```
 
 ## Cheat sheet
 All commands with example values, ready to copy: [CHEATSHEET.md](CHEATSHEET.md). In a terminal, `Get-Help <script> -Examples` shows the examples for one script.

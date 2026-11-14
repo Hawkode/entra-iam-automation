@@ -2,6 +2,15 @@
 
 All notable changes to this project. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Pester 5 tests for the shared module (`tests/`), run by CI on Windows PowerShell 5.1 and PowerShell 7. Graph and Exchange are mocked.
+- `build/Invoke-Tests.ps1`: installs pinned Pester and runs the tests.
+
+### Changed
+- CI workflow renamed from `lint` to `ci`, with a test job next to PSScriptAnalyzer.
+
 ## [1.3.0] - 2026-11-10
 
 Access review campaigns, tested in the lab tenant. Returned files saved by Excel, `-AllAssignedGroups` and `-IncludeSignIn` not yet tested live.
