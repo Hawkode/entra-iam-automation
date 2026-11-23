@@ -1,5 +1,7 @@
 # Real tenant values, never commit
 config.local.psd1
+# Backups New-IamConfig.ps1 makes of it
+config.local.*
 
 # Script output: logs and reports contain UPNs
 output/

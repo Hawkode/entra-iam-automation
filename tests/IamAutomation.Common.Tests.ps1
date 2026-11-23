@@ -623,3 +623,167 @@ Describe 'ConvertTo-IamAdAnchorMap' {
         (ConvertTo-IamAdAnchorMap -AdUser @()).Count | Should -Be 0
     }
 }
+
+Describe 'ConvertTo-IamConfigText' {
+    It 'writes a file that reads back with the same values' {
+        $cfg = [ordered]@{
+            TenantId             = $script:tenantId
+            StaleDays            = 90
+            BreakGlassUpns       = @('bg1@lab.example.org', 'bg2@lab.example.org')
+            DepartmentOUs        = [ordered]@{ 'HR' = 'OU=HR,DC=lab,DC=example'; 'Customer Support' = 'OU=CS,DC=lab,DC=example' }
+            LeaversOUInSyncScope = $false
+            ReviewFallbackUpn    = "o'brien@lab.example.org"
+        }
+        $path = Join-Path -Path $TestDrive -ChildPath 'roundtrip.psd1'
+        Set-Content -LiteralPath $path -Value (ConvertTo-IamConfigText -Config $cfg)
+        $back = Import-PowerShellDataFile -Path $path
+        $back.TenantId | Should -Be $script:tenantId
+        $back.StaleDays | Should -Be 90
+        $back.StaleDays | Should -BeOfType [int]
+        @($back.BreakGlassUpns).Count | Should -Be 2
+        $back.DepartmentOUs['Customer Support'] | Should -Be 'OU=CS,DC=lab,DC=example'
+        $back.LeaversOUInSyncScope | Should -BeFalse
+        $back.LeaversOUInSyncScope | Should -BeOfType [bool]
+        $back.ReviewFallbackUpn | Should -Be "o'brien@lab.example.org"
+    }
+
+    It 'keeps the key order and writes comments above a key' {
+        $text = ConvertTo-IamConfigText -Config ([ordered]@{ B = 'x'; A = 'y' }) -Comment @{ A = 'Comment for A' }
+        $lines = $text -split '\r?\n'
+        $lines[1] | Should -Match '^\s+B\s+= ''x''$'
+        $lines[2] | Should -Be '    # Comment for A'
+        $lines[3] | Should -Match '^\s+A\s+= ''y''$'
+    }
+
+    It 'writes empty arrays and tables' {
+        $text = ConvertTo-IamConfigText -Config ([ordered]@{ List = @(); Map = @{} })
+        $text | Should -Match 'List = @\(\)'
+        $text | Should -Match 'Map\s+= @\{\}'
+    }
+
+    It 'refuses a value it cannot write' {
+        { ConvertTo-IamConfigText -Config @{ Bad = [pscustomobject]@{ a = 1 } } } | Should -Throw '*strings, numbers or booleans*'
+    }
+}
+
+Describe 'Test-IamOuInSyncScope' {
+    BeforeAll {
+        $script:inc = @('DC=lab,DC=example')
+    }
+
+    It 'is in scope under an included container' {
+        Test-IamOuInSyncScope -DistinguishedName 'OU=Leavers,OU=Lab Users,DC=lab,DC=example' -Inclusion $script:inc | Should -BeTrue
+    }
+
+    It 'is in scope when it is the included container itself, in any case' {
+        Test-IamOuInSyncScope -DistinguishedName 'ou=leavers,dc=lab,dc=example' -Inclusion @('OU=Leavers,DC=lab,DC=example') | Should -BeTrue
+    }
+
+    It 'is out of scope under an excluded child of an included container' {
+        Test-IamOuInSyncScope -DistinguishedName 'OU=Leavers,OU=Lab Users,DC=lab,DC=example' -Inclusion $script:inc -Exclusion @('OU=Leavers,OU=Lab Users,DC=lab,DC=example') |
+            Should -BeFalse
+    }
+
+    It 'is in scope again under an included OU inside an excluded one' {
+        Test-IamOuInSyncScope -DistinguishedName 'OU=Keep,OU=Old,DC=lab,DC=example' -Inclusion @('DC=lab,DC=example', 'OU=Keep,OU=Old,DC=lab,DC=example') -Exclusion @('OU=Old,DC=lab,DC=example') |
+            Should -BeTrue
+    }
+
+    It 'does not match on a partial OU name' {
+        Test-IamOuInSyncScope -DistinguishedName 'OU=Leavers,DC=lab,DC=example' -Inclusion @('ers,DC=lab,DC=example') | Should -BeFalse
+    }
+
+    It 'is out of scope with no inclusion list' {
+        Test-IamOuInSyncScope -DistinguishedName 'OU=Leavers,DC=lab,DC=example' | Should -BeFalse
+    }
+}
+
+Describe 'ConvertFrom-IamMsolDescription' {
+    It 'reads the server name' {
+        $d = 'Account created by Microsoft Azure Active Directory Connect with installation identifier 0a1b2c3d running on computer SYNC01 configured to synchronize to tenant lab.example.org.'
+        ConvertFrom-IamMsolDescription -Description $d | Should -Be 'SYNC01'
+    }
+
+    It 'returns nothing without a server name' -ForEach @(
+        @{ Value = 'Service account' }
+        @{ Value = '' }
+    ) {
+        ConvertFrom-IamMsolDescription -Description $Value | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-IamUpnFormatGuess' {
+    It 'finds the format most users follow, counting numbered duplicates' {
+        $users = @(
+            @{ givenName = 'Jane'; surname = 'Doe'; userPrincipalName = 'jane.doe@lab.example.org' }
+            @{ givenName = 'John'; surname = 'Doe'; userPrincipalName = 'john.doe2@lab.example.org' }
+            @{ givenName = 'Ana'; surname = 'Silva'; userPrincipalName = 'asilva@lab.example.org' }
+        )
+        $g = Get-IamUpnFormatGuess -User $users
+        $g.Format | Should -Be '{given}.{surname}'
+        $g.Hits | Should -Be 2
+        $g.Total | Should -Be 3
+    }
+
+    It 'ignores guests and users without a name' {
+        $users = @(
+            @{ givenName = 'Jane'; surname = 'Doe'; userPrincipalName = 'jdoe@lab.example.org' }
+            @{ givenName = 'Ext'; surname = 'User'; userPrincipalName = 'ext.user_partner.example#EXT#@lab.example.org' }
+            @{ givenName = $null; surname = 'Admin'; userPrincipalName = 'admin@lab.example.org' }
+        )
+        $g = Get-IamUpnFormatGuess -User $users
+        $g.Format | Should -Be '{g}{surname}'
+        $g.Total | Should -Be 1
+    }
+
+    It 'returns nothing when no format matches' {
+        Get-IamUpnFormatGuess -User @(@{ givenName = 'Jane'; surname = 'Doe'; userPrincipalName = 'user42@lab.example.org' }) |
+            Should -BeNullOrEmpty
+    }
+
+    It 'returns nothing for no users' {
+        Get-IamUpnFormatGuess -User @() | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-IamBreakGlassCandidate' {
+    BeforeAll {
+        $script:admins = @(
+            @{ id = 'u-bg'; userPrincipalName = 'bg@lab.example.org' }
+            @{ id = 'u-admin'; userPrincipalName = 'admin@lab.example.org' }
+        )
+        function Get-TestPolicy {
+            param([string]$State = 'enabled', [string[]]$IncludeUsers = @('All'), [string[]]$ExcludeUsers = @(), [string[]]$ExcludeGroups = @())
+            @{ state = $State; conditions = @{ users = @{ includeUsers = $IncludeUsers; excludeUsers = $ExcludeUsers; excludeGroups = $ExcludeGroups } } }
+        }
+    }
+
+    It 'suggests an admin excluded by user from every policy that covers everyone' {
+        $policies = @((Get-TestPolicy -ExcludeUsers 'u-bg'), (Get-TestPolicy -ExcludeUsers 'u-bg'))
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy $policies | Should -Be 'bg@lab.example.org'
+    }
+
+    It 'suggests an admin excluded through a group' {
+        $policies = @(Get-TestPolicy -ExcludeGroups 'g-bg')
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy $policies -GroupIdsByUserId @{ 'u-bg' = @('g-bg') } |
+            Should -Be 'bg@lab.example.org'
+    }
+
+    It 'skips an admin still covered by one enabled policy' {
+        $policies = @((Get-TestPolicy -ExcludeUsers 'u-bg'), (Get-TestPolicy))
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy $policies | Should -BeNullOrEmpty
+    }
+
+    It 'ignores report-only and disabled policies' {
+        $policies = @((Get-TestPolicy -ExcludeUsers 'u-bg'), (Get-TestPolicy -State 'disabled'), (Get-TestPolicy -State 'enabledForReportingButNotEnforced'))
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy $policies | Should -Be 'bg@lab.example.org'
+    }
+
+    It 'suggests nobody when no policy excludes anyone' {
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy @(Get-TestPolicy -IncludeUsers 'u-other') | Should -BeNullOrEmpty
+    }
+
+    It 'suggests nobody without enabled policies' {
+        Get-IamBreakGlassCandidate -Admin $script:admins -Policy @() | Should -BeNullOrEmpty
+    }
+}

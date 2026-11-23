@@ -823,10 +823,194 @@ function Remove-IamUserLicense {
     }
 }
 
+function ConvertTo-IamConfigText {
+    <#
+    .SYNOPSIS
+        Turns a config table into the text of a .psd1 file that Import-PowerShellDataFile can read.
+    .DESCRIPTION
+        Values can be strings, numbers, booleans, $null, arrays of those, and one level of
+        nested table (string keys, scalar values), which covers every key in config.example.psd1.
+        Keys keep their order when the table is [ordered]. -Comment adds lines above a key.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Config,
+        [System.Collections.IDictionary]$Comment = @{}
+    )
+    $scalar = {
+        param($Value)
+        if ($null -eq $Value) { return '$null' }
+        if ($Value -is [bool]) { if ($Value) { return '$true' } else { return '$false' } }
+        if ($Value -is [string]) { return "'" + $Value.Replace("'", "''") + "'" }
+        if ($Value -is [ValueType]) { return [Convert]::ToString($Value, [Globalization.CultureInfo]::InvariantCulture) }
+        throw "Config values must be strings, numbers or booleans, not $($Value.GetType().Name)."
+    }
+    $keyText = {
+        param($Key)
+        if ("$Key" -match '^[A-Za-z_][A-Za-z0-9_]*$') { return "$Key" }
+        "'" + "$Key".Replace("'", "''") + "'"
+    }
+
+    $width = (@(0) + @($Config.Keys | ForEach-Object { (& $keyText $_).Length }) | Measure-Object -Maximum).Maximum
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add('@{')
+    foreach ($key in $Config.Keys) {
+        if ($Comment.Contains($key)) {
+            foreach ($c in @($Comment[$key])) { $lines.Add("    # $c") }
+        }
+        $value = $Config[$key]
+        $name = (& $keyText $key).PadRight($width)
+        if ($value -is [System.Collections.IDictionary]) {
+            if ($value.Count -eq 0) { $lines.Add("    $name = @{}"); continue }
+            $lines.Add("    $name = @{")
+            $innerWidth = (@($value.Keys | ForEach-Object { (& $keyText $_).Length }) | Measure-Object -Maximum).Maximum
+            foreach ($innerKey in $value.Keys) {
+                $lines.Add(('        {0} = {1}' -f (& $keyText $innerKey).PadRight($innerWidth), (& $scalar $value[$innerKey])))
+            }
+            $lines.Add('    }')
+        }
+        elseif ($value -is [System.Collections.IEnumerable] -and $value -isnot [string]) {
+            $items = @($value | ForEach-Object { & $scalar $_ })
+            $lines.Add(('    {0} = @({1})' -f $name, ($items -join ', ')))
+        }
+        else {
+            $lines.Add(('    {0} = {1}' -f $name, (& $scalar $value)))
+        }
+    }
+    $lines.Add('}')
+    $lines -join [Environment]::NewLine
+}
+
+function Test-IamOuInSyncScope {
+    <#
+    .SYNOPSIS
+        True when a distinguished name is inside the Entra Connect OU filtering scope.
+    .DESCRIPTION
+        Takes the container inclusion and exclusion lists of the AD connector partitions
+        (Get-ADSyncConnector > Partitions > ConnectorPartitionScope). The most specific
+        matching container wins: an OU excluded under an included parent is out of scope.
+        OU filtering only. Group-based and attribute filtering are not covered.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DistinguishedName,
+        [string[]]$Inclusion = @(),
+        [string[]]$Exclusion = @()
+    )
+    $dn = $DistinguishedName.Trim()
+    $longest = {
+        param([string[]]$Container)
+        $best = -1
+        foreach ($c in @($Container | Where-Object { "$_".Trim() })) {
+            $c = "$c".Trim()
+            $inside = $dn.Equals($c, [StringComparison]::OrdinalIgnoreCase) -or
+                $dn.EndsWith(",$c", [StringComparison]::OrdinalIgnoreCase)
+            if ($inside -and $c.Length -gt $best) { $best = $c.Length }
+        }
+        $best
+    }
+    $included = & $longest $Inclusion
+    $excluded = & $longest $Exclusion
+    $included -ge 0 -and $included -gt $excluded
+}
+
+function ConvertFrom-IamMsolDescription {
+    <#
+    .SYNOPSIS
+        Reads the Entra Connect server name from the description of its MSOL_ AD account.
+    .DESCRIPTION
+        Entra Connect creates the AD DS connector account MSOL_<id> with a description that
+        includes "running on computer <name>". Returns the name, or nothing when it is not there.
+    #>
+    [CmdletBinding()]
+    param([AllowEmptyString()][AllowNull()][string]$Description)
+    if ("$Description" -match 'running on computer\s+(?<name>[^\s,]+)') {
+        $Matches['name'].TrimEnd('.')
+    }
+}
+
+function Get-IamUpnFormatGuess {
+    <#
+    .SYNOPSIS
+        Finds the UpnFormat that matches most existing users.
+    .DESCRIPTION
+        Builds the prefix for each candidate format with Get-IamUpnPrefix and compares it with
+        the part of the UPN before @. A trailing number (jane.doe2) still counts as a match.
+        Users without a given name or surname, and guests (#EXT#), are left out.
+        Returns Format, Hits and Total for the best format, or nothing when none matches.
+        On a tie, the format listed first wins.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$User,
+        [ValidateNotNullOrEmpty()][string[]]$Format = @('{given}.{surname}', '{g}{surname}', '{given}{surname}', '{g}.{surname}', '{given}{s}', '{surname}.{given}')
+    )
+    $named = @($User | Where-Object {
+            $_.givenName -and $_.surname -and $_.userPrincipalName -and "$($_.userPrincipalName)" -notlike '*#EXT#*'
+        })
+    if ($named.Count -eq 0) { return }
+
+    $results = foreach ($i in 0..($Format.Count - 1)) {
+        $hits = 0
+        foreach ($u in $named) {
+            $prefix = ("$($u.userPrincipalName)" -split '@')[0].ToLowerInvariant()
+            try { $expected = Get-IamUpnPrefix -GivenName $u.givenName -Surname $u.surname -Format $Format[$i] }
+            catch { continue }
+            if ($prefix -match ('^' + [regex]::Escape($expected) + '\d*$')) { $hits++ }
+        }
+        [pscustomobject]@{ Format = $Format[$i]; Hits = $hits; Total = $named.Count; Index = $i }
+    }
+    $results | Where-Object { $_.Hits -gt 0 } |
+        Sort-Object -Property @{ Expression = 'Hits'; Descending = $true }, @{ Expression = 'Index'; Descending = $false } |
+        Select-Object -First 1 -Property Format, Hits, Total
+}
+
+function Get-IamBreakGlassCandidate {
+    <#
+    .SYNOPSIS
+        Lists Global Administrators that look like emergency access (break-glass) accounts.
+    .DESCRIPTION
+        A candidate is explicitly excluded from at least one enabled Conditional Access policy
+        (by user, group or the Global Administrator role) and covered by none. Report-only and
+        disabled policies are ignored. A suggestion only: the operator confirms the list.
+        -Admin: objects with id and userPrincipalName. -Policy: policies as returned by Graph.
+        -GroupIdsByUserId: user id -> ids of the groups the user is in (transitive).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Admin,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Policy,
+        [System.Collections.IDictionary]$GroupIdsByUserId = @{}
+    )
+    $globalAdminRole = '62e90394-69f5-4237-9190-012177145e10'
+    $enabled = @($Policy | Where-Object { $_.state -eq 'enabled' })
+    if ($enabled.Count -eq 0) { return }
+
+    foreach ($a in $Admin) {
+        $groups = @($GroupIdsByUserId[$a.id] | Where-Object { $_ })
+        $excludedSomewhere = $false
+        $covered = $false
+        foreach ($p in $enabled) {
+            $u = $p.conditions.users
+            $excluded = (@($u.excludeUsers) -contains $a.id) -or
+                (@(@($u.excludeGroups) | Where-Object { $groups -contains $_ }).Count -gt 0) -or
+                (@($u.excludeRoles) -contains $globalAdminRole)
+            if ($excluded) { $excludedSomewhere = $true; continue }
+            $included = (@($u.includeUsers) -contains 'All') -or (@($u.includeUsers) -contains $a.id) -or
+                (@(@($u.includeGroups) | Where-Object { $groups -contains $_ }).Count -gt 0) -or
+                (@($u.includeRoles) -contains $globalAdminRole)
+            if ($included) { $covered = $true; break }
+        }
+        if ($excludedSomewhere -and -not $covered) { $a.userPrincipalName }
+    }
+}
+
 Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
-    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap
+    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap,
+    ConvertTo-IamConfigText, Test-IamOuInSyncScope, ConvertFrom-IamMsolDescription, Get-IamUpnFormatGuess,
+    Get-IamBreakGlassCandidate

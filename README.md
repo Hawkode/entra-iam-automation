@@ -13,6 +13,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Governance/` | Access review campaigns: extract per reviewer, then apply the decisions with evidence |
+| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
 
@@ -25,12 +26,17 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.4.1` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.5.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.4.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.5.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
-2. Copy `config.example.psd1` to `config.local.psd1` and replace every example value (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
+2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
+   ```powershell
+   .\Setup\New-IamConfig.ps1 -WhatIf   # shows the file it would write
+   .\Setup\New-IamConfig.ps1
+   ```
+   Or copy `config.example.psd1` to `config.local.psd1` and replace every example value by hand (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
 3. Run a read-only report first. It proves sign-in, consent and the module work in your tenant:
    ```powershell
    .\Reports\Get-RiskyAppPermissions.ps1
@@ -53,6 +59,8 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
   ```
 
 ### Config reference
+`Setup\New-IamConfig.ps1` reads `TenantId`, `UsageLocation`, `DefaultDomain`, `LicenseSkuPartNumber` and `UpnFormat` from the tenant, and `DepartmentOUs`, `LeaversOU`, `EntraConnectServer` and `LeaversOUInSyncScope` from AD and Entra Connect. It suggests `AllowedDepartments` (departments in use), `ReviewFallbackUpn` and `BreakGlassUpns` (Global Administrators excluded from every enabled Conditional Access policy that would cover them) for you to check. `LeaversOUInSyncScope` becomes `$true` only when the Entra Connect OU filtering shows `LeaversOU` in scope and you confirm.
+
 | Key | Used by | Value |
 |---|---|---|
 | `TenantId` | All | Tenant ID (Entra admin center > Overview) |
@@ -181,6 +189,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
+| Setup/New-IamConfig.ps1 | Done, helpers tested offline (Pester). Not run against a tenant, AD or Entra Connect yet |
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab |
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` tested in hybrid lab, including a user whose AD and cloud UPNs differ |
@@ -198,7 +207,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
 
 ## Tests
-[`tests/IamAutomation.Common.Tests.ps1`](tests/IamAutomation.Common.Tests.ps1) covers the shared module with Pester 5: UPN building and accent stripping, password generation, config validation, output files, the leaver mailbox plan, the cloud and hybrid sync-state guard, the source-anchor lookup, the verified-domain check, the PowerShell 7 check, and the retry when Graph refuses to delete the default MFA method. Graph and Exchange calls are mocked, so the tests need no tenant. CI runs them on Windows PowerShell 5.1 and PowerShell 7, after PSScriptAnalyzer: the shared module still loads on 5.1, only Graph sign-in needs 7.
+[`tests/IamAutomation.Common.Tests.ps1`](tests/IamAutomation.Common.Tests.ps1) covers the shared module with Pester 5: UPN building and accent stripping, password generation, config validation, output files, the leaver mailbox plan, the cloud and hybrid sync-state guard, the source-anchor lookup, the verified-domain check, the PowerShell 7 check, the config file writer, the sync scope check, the UPN pattern guess, the break-glass suggestion, and the retry when Graph refuses to delete the default MFA method. Graph and Exchange calls are mocked, so the tests need no tenant. CI runs them on Windows PowerShell 5.1 and PowerShell 7, after PSScriptAnalyzer: the shared module still loads on 5.1, only Graph sign-in needs 7.
 
 Run them locally (installs Pester 5.9.1 for the current user):
 ```powershell

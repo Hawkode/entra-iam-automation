@@ -4,6 +4,18 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-23
+
+Setup script, so a new install no longer means filling in the config by hand.
+
+### Added
+- `Setup/New-IamConfig.ps1`: builds `config.local.psd1` from Entra ID, AD and Entra Connect, read-only. Asks only for what it cannot find, shows the result, backs up the old file and writes after confirmation. Keeps keys it does not know. `-SkipHybrid` for cloud-only tenants or machines without RSAT.
+- Shared module: `ConvertTo-IamConfigText`, `Test-IamOuInSyncScope`, `ConvertFrom-IamMsolDescription`, `Get-IamUpnFormatGuess`, `Get-IamBreakGlassCandidate`, with tests.
+
+### Changed
+- README and cheat sheet: setup uses the script, manual copy kept as the fallback. Clone examples point to `v1.5.0`.
+- `.gitignore`: `config.local.*`, so config backups are never committed.
+
 ## [1.4.1] - 2026-11-23
 
 One fix found while testing the remaining options in the hybrid lab.
