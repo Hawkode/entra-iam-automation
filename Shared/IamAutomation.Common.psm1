@@ -707,7 +707,7 @@ function ConvertTo-IamImmutableId {
     [Convert]::ToBase64String($bytes)
 }
 
-function New-IamAdAnchorMap {
+function ConvertTo-IamAdAnchorMap {
     <#
     .SYNOPSIS
         Indexes AD users by the onPremisesImmutableId their cloud account holds (the source anchor).
@@ -829,4 +829,4 @@ Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
-    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, New-IamAdAnchorMap
+    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap

@@ -10,7 +10,7 @@ One fix found while testing the remaining options in the hybrid lab.
 
 ### Added
 - `Get-StaleAccounts.ps1`: `InAd` column, and a warning listing synced users not found in the AD domain it ran against.
-- Shared module: `New-IamAdAnchorMap`, with tests.
+- Shared module: `ConvertTo-IamAdAnchorMap`, with tests.
 
 ### Changed
 - README: status for `Get-StaleAccounts.ps1 -IncludeOnPrem` and `Disable-CloudLeaver.ps1 -RemoveAuthMethods`, both tested in the lab.

@@ -50,7 +50,7 @@ $breakGlass = @($cfg.BreakGlassUpns)
 $adByAnchor = $null
 if ($IncludeOnPrem) {
     Import-IamAdModule
-    $adByAnchor = New-IamAdAnchorMap -AdUser @(Get-ADUser -Filter * -Properties LastLogonTimestamp, 'mS-DS-ConsistencyGuid')
+    $adByAnchor = ConvertTo-IamAdAnchorMap -AdUser @(Get-ADUser -Filter * -Properties LastLogonTimestamp, 'mS-DS-ConsistencyGuid')
 }
 
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.Read.All', 'AuditLog.Read.All'
