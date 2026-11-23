@@ -191,9 +191,9 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licences, `-RemoveAuthMethods` and `-ConvertMailbox` tested offline only |
-| Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. CSV and `-ResumeUserPrincipalName` untested live. Verified-domain check added after the lab run, tested offline |
-| Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard. Source-anchor lookup added after the lab run, tested offline |
-| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). `-ConvertMailbox` tested offline only (no Exchange in the lab). Source-anchor lookup added after the lab run, tested offline |
+| Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. Verified-domain check tested in lab. CSV and `-ResumeUserPrincipalName` untested live |
+| Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ) |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab) |
 
 Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
 

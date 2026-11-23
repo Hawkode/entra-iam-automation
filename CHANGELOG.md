@@ -16,7 +16,7 @@ Fixes from testing the hybrid scripts against AD DS and Entra Connect in the hyb
 - Hybrid mover and leaver find the cloud account through the source anchor (`mS-DS-ConsistencyGuid`, or `objectGUID`) instead of the UPN, so they work when the AD and cloud UPNs differ.
 - Hybrid leaver: break-glass and signed-in admin checks also use the cloud UPN, and the mailbox steps use the cloud UPN.
 - Hybrid joiner asks for `User.Read`, to read the tenant's verified domains.
-- README: hybrid status from the lab run, PowerShell 7 requirement, source anchor note.
+- README: hybrid status from the lab run and the retest after the fixes, PowerShell 7 requirement, source anchor note.
 - CI workflow renamed from `lint` to `ci`, with a test job next to PSScriptAnalyzer.
 
 ### Fixed
