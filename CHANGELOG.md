@@ -4,6 +4,14 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+### Fixed
+- `Get-StaleAccounts.ps1 -IncludeOnPrem`: matched AD accounts by the cloud UPN, so synced users whose AD UPN differs got no AD logon and could show as stale. Now matched through the source anchor, with one AD query instead of one per user. Found in the hybrid lab.
+- `Get-StaleAccounts.ps1`: `DaysSince` is a whole number (it printed `10.00`).
+
+### Added
+- `Get-StaleAccounts.ps1`: `InAd` column, and a warning listing synced users not found in the AD domain it ran against.
+- Shared module: `New-IamAdAnchorMap`, with tests.
+
 ## [1.4.0] - 2026-11-23
 
 Fixes from testing the hybrid scripts against AD DS and Entra Connect in the hybrid lab.

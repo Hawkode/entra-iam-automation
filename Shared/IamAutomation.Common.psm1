@@ -707,6 +707,26 @@ function ConvertTo-IamImmutableId {
     [Convert]::ToBase64String($bytes)
 }
 
+function New-IamAdAnchorMap {
+    <#
+    .SYNOPSIS
+        Indexes AD users by the onPremisesImmutableId their cloud account holds (the source anchor).
+    .DESCRIPTION
+        For reports that start from Entra ID and need the matching AD account. One AD query up
+        front, then a lookup per cloud user, instead of one AD search per user. Keys are Base64,
+        which is case-sensitive, so the map compares keys exactly.
+    #>
+    [CmdletBinding()]
+    [OutputType([System.Collections.Generic.Dictionary[string, object]])]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$AdUser)
+    $map = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+    foreach ($a in $AdUser) {
+        $id = ConvertTo-IamImmutableId -ObjectGuid $a.ObjectGUID -ConsistencyGuid $a.'mS-DS-ConsistencyGuid'
+        $map[$id] = $a
+    }
+    , $map
+}
+
 function Get-IamSyncedCloudUser {
     <#
     .SYNOPSIS
@@ -809,4 +829,4 @@ Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
-    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser
+    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, New-IamAdAnchorMap

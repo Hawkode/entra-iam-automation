@@ -11,6 +11,9 @@
     stale. -IncludeOnPrem cross-checks AD lastLogonTimestamp for synced users
     (ActiveDirectory module, domain-joined machine). lastLogonTimestamp replicates
     with up to 14 days' lag, so keep StaleDays at 30 or more when using it.
+    The AD account is matched through the source anchor (onPremisesImmutableId),
+    not the UPN, so it works when the AD and cloud UPNs differ. Only the domain of
+    the machine it runs on is read: synced users from another domain show no AD logon.
 
     signInActivity itself can lag real sign-ins by a few hours.
 
@@ -44,13 +47,17 @@ $now = (Get-Date).ToUniversalTime()
 $cutoff = $now.AddDays(-$StaleDays)
 $breakGlass = @($cfg.BreakGlassUpns)
 
-if ($IncludeOnPrem) { Import-Module ActiveDirectory }
+$adByAnchor = $null
+if ($IncludeOnPrem) {
+    Import-IamAdModule
+    $adByAnchor = New-IamAdAnchorMap -AdUser @(Get-ADUser -Filter * -Properties LastLogonTimestamp, 'mS-DS-ConsistencyGuid')
+}
 
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.Read.All', 'AuditLog.Read.All'
 
 try {
     $users = Get-MgUser -All -Property Id, DisplayName, UserPrincipalName, UserType, AccountEnabled,
-    CreatedDateTime, OnPremisesSyncEnabled, SignInActivity
+    CreatedDateTime, OnPremisesSyncEnabled, OnPremisesImmutableId, SignInActivity
 }
 catch {
     if ($_.Exception.Message -match 'NonPremiumTenant|premium license') {
@@ -65,9 +72,14 @@ $report = foreach ($u in $users) {
         Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
 
     $adLast = $null
+    $adFound = $null
     if ($IncludeOnPrem -and $u.OnPremisesSyncEnabled) {
-        $ad = Get-ADUser -Filter "UserPrincipalName -eq '$($u.UserPrincipalName)'" -Properties LastLogonTimestamp
-        if ($ad.LastLogonTimestamp) { $adLast = [datetime]::FromFileTimeUtc($ad.LastLogonTimestamp) }
+        $ad = $null
+        $adFound = $false
+        if ($u.OnPremisesImmutableId -and $adByAnchor.TryGetValue($u.OnPremisesImmutableId, [ref]$ad)) {
+            $adFound = $true
+            if ($ad.LastLogonTimestamp) { $adLast = [datetime]::FromFileTimeUtc($ad.LastLogonTimestamp) }
+        }
     }
 
     $last = @($cloudLast, $adLast) | Where-Object { $_ } | Sort-Object -Descending | Select-Object -First 1
@@ -86,7 +98,8 @@ $report = foreach ($u in $users) {
         Synced          = [bool]$u.OnPremisesSyncEnabled
         LastCloudSignIn = $cloudLast
         LastAdLogon     = $adLast
-        DaysSince       = if ($last) { [math]::Floor(($now - $last).TotalDays) } else { $null }
+        DaysSince       = if ($last) { [int][math]::Floor(($now - $last).TotalDays) } else { $null }
+        InAd            = $adFound
         Finding         = $finding
     }
 }
@@ -98,5 +111,10 @@ $report | Export-Csv -Path $csv -NoTypeInformation
 
 $stale = @($report | Where-Object { $_.Finding -in 'Stale', 'Never signed in' }).Count
 Write-IamLog -Message "Stale accounts (threshold $StaleDays days): $stale of $($report.Count). On-prem check: $IncludeOnPrem. CSV: $csv"
+$missing = @($report | Where-Object { $_.InAd -eq $false })
+if ($missing.Count) {
+    Write-IamLog -Level WARN -Message ("$($missing.Count) synced user(s) not found in this AD domain, so no AD logon was checked: " +
+        "$($missing.Upn -join ', '). Run from the domain they sync from.")
+}
 
 $report | Format-Table DisplayName, UserType, Enabled, LastCloudSignIn, DaysSince, Finding -AutoSize

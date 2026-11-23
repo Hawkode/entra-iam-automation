@@ -601,3 +601,25 @@ Describe 'Get-IamSyncedCloudUser' {
         { Get-IamSyncedCloudUser -ObjectGuid $script:guid -AdUserPrincipalName 'jdoe@lab.example.org' } | Should -Throw '*sync is off*'
     }
 }
+
+Describe 'New-IamAdAnchorMap' {
+    It 'indexes AD users by the anchor their cloud account holds' {
+        $users = @(
+            [pscustomobject]@{ ObjectGUID = [guid]'00112233-4455-6677-8899-aabbccddeeff'; 'mS-DS-ConsistencyGuid' = $null; SamAccountName = 'a' }
+            [pscustomobject]@{ ObjectGUID = [guid]::NewGuid(); 'mS-DS-ConsistencyGuid' = [byte[]](0..15); SamAccountName = 'b' }
+        )
+        $map = New-IamAdAnchorMap -AdUser $users
+        $map.Count | Should -Be 2
+        $map['MyIRAFVEd2aImaq7zN3u/w=='].SamAccountName | Should -Be 'a'
+        $map['AAECAwQFBgcICQoLDA0ODw=='].SamAccountName | Should -Be 'b'
+    }
+
+    It 'compares keys exactly, because Base64 is case-sensitive' {
+        $map = New-IamAdAnchorMap -AdUser @([pscustomobject]@{ ObjectGUID = [guid]'00112233-4455-6677-8899-aabbccddeeff'; 'mS-DS-ConsistencyGuid' = $null })
+        $map.ContainsKey('myiraFVEd2aImaq7zN3u/w==') | Should -BeFalse
+    }
+
+    It 'returns an empty map for no users' {
+        (New-IamAdAnchorMap -AdUser @()).Count | Should -Be 0
+    }
+}
