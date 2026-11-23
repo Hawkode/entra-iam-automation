@@ -1,5 +1,5 @@
 # Shared functions for the Cloud, Hybrid and Reports scripts.
-# Requires: Install-Module Microsoft.Graph -Scope CurrentUser
+# Requires: PowerShell 7 for anything that signs in to Graph. Install-Module Microsoft.Graph -Scope CurrentUser
 
 $script:RepoRoot = Split-Path -Path $PSScriptRoot -Parent
 
@@ -652,6 +652,93 @@ function Get-IamLeaverMailboxPlan {
     $plan
 }
 
+function Assert-IamGraphHost {
+    <#
+    .SYNOPSIS
+        Stops on Windows PowerShell 5.1, where the Microsoft Graph SDK cannot sign in.
+    .DESCRIPTION
+        Graph SDK 2.34 and later fail on 5.1 at Connect-MgGraph with "Method 'RefreshCacheAsync'
+        ... does not have an implementation" (assembly loading bug, still there in 2.41.2).
+        Microsoft is ending Graph SDK support on 5.1. Connect-IamGraph runs this before sign-in,
+        and every script signs in before it changes anything.
+    #>
+    [CmdletBinding()]
+    param([string]$Edition = $PSVersionTable.PSEdition)
+    if ($Edition -eq 'Desktop') {
+        throw ('This script needs PowerShell 7 (pwsh). The Microsoft Graph SDK cannot sign in on ' +
+            'Windows PowerShell 5.1. Nothing was changed.')
+    }
+}
+
+function Assert-IamVerifiedDomain {
+    <#
+    .SYNOPSIS
+        Stops if a domain is not a verified domain in the signed-in tenant.
+    .DESCRIPTION
+        Entra Connect keeps an AD UPN in the cloud only when its suffix is a verified domain.
+        Otherwise the user syncs as @<tenant>.onmicrosoft.com and a lookup by the AD UPN finds
+        nothing. Reads verifiedDomains from the organization object, which needs only User.Read.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Domain)
+    $verified = @(@(Get-MgOrganization -Property Id, VerifiedDomains -ErrorAction Stop).VerifiedDomains |
+            ForEach-Object { "$($_.Name)".ToLowerInvariant() })
+    if ($verified -notcontains $Domain.ToLowerInvariant()) {
+        throw ("'$Domain' is not a verified domain in Entra ID, so users would sync as @<tenant>.onmicrosoft.com. " +
+            "Verified domains: $($verified -join ', '). Nothing was created.")
+    }
+}
+
+function ConvertTo-IamImmutableId {
+    <#
+    .SYNOPSIS
+        Returns the onPremisesImmutableId that Entra Connect gives an AD user (the source anchor).
+    .DESCRIPTION
+        The default source anchor is mS-DS-ConsistencyGuid, which Entra Connect fills from
+        objectGUID the first time the user syncs. The cloud account holds it in Base64 as
+        onPremisesImmutableId. Uses mS-DS-ConsistencyGuid when it is set, objectGUID otherwise.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][guid]$ObjectGuid,
+        [byte[]]$ConsistencyGuid
+    )
+    $bytes = if ($ConsistencyGuid -and $ConsistencyGuid.Length -eq 16) { $ConsistencyGuid } else { $ObjectGuid.ToByteArray() }
+    [Convert]::ToBase64String($bytes)
+}
+
+function Get-IamSyncedCloudUser {
+    <#
+    .SYNOPSIS
+        Finds the Entra ID account linked to an AD user through the source anchor, not the UPN.
+    .DESCRIPTION
+        The AD UPN and the cloud UPN can differ: UPN suffix not verified, alternate login ID, or a
+        UPN changed after the first sync. The source anchor does not change, so the lookup always
+        finds the account Entra Connect manages. Stops if no account matches, or if the match is
+        not synced from AD. Default source anchors only (mS-DS-ConsistencyGuid or objectGUID).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][guid]$ObjectGuid,
+        [byte[]]$ConsistencyGuid,
+        [Parameter(Mandatory)][string]$AdUserPrincipalName
+    )
+    $immutableId = ConvertTo-IamImmutableId -ObjectGuid $ObjectGuid -ConsistencyGuid $ConsistencyGuid
+    $users = @(Get-MgUser -Filter "onPremisesImmutableId eq '$immutableId'" -Property Id, UserPrincipalName, AccountEnabled, OnPremisesSyncEnabled -ErrorAction Stop)
+    if ($users.Count -eq 0) {
+        throw ("$AdUserPrincipalName has no Entra ID account with source anchor $immutableId. " +
+            'It has not synced yet, or its OU is outside the sync scope. Nothing changed.')
+    }
+    $user = $users[0]
+    if ($user.OnPremisesSyncEnabled -ne $true) {
+        throw "$AdUserPrincipalName matches $($user.UserPrincipalName) in Entra ID, but sync is off for that account. Nothing changed."
+    }
+    if ($user.UserPrincipalName -ne $AdUserPrincipalName) {
+        Write-IamLog -Message "$AdUserPrincipalName signs in to Entra ID as $($user.UserPrincipalName) (matched by source anchor)."
+    }
+    $user
+}
+
 function Connect-IamGraph {
     <#
     .SYNOPSIS
@@ -662,6 +749,7 @@ function Connect-IamGraph {
         [Parameter(Mandatory)][string]$TenantId,
         [Parameter(Mandatory)][string[]]$Scopes
     )
+    Assert-IamGraphHost
     Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -NoWelcome -ErrorAction Stop
     $ctx = Get-MgContext
     Write-IamLog -Message "Connected to $($ctx.TenantId) as $($ctx.Account). Scopes: $($ctx.Scopes -join ', ')"
@@ -720,4 +808,5 @@ Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath,
     Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
-    Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll
+    Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
+    Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser

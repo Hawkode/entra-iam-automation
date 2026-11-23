@@ -115,7 +115,7 @@ if (@($cfg.BreakGlassUpns) -contains $UserPrincipalName) {
 }
 
 Import-IamAdModule
-$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Description, MemberOf, Enabled, adminCount, Manager
+$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Description, MemberOf, Enabled, adminCount, Manager, 'mS-DS-ConsistencyGuid'
 if (-not $ad) { throw "$UserPrincipalName not found in AD." }
 if ($ad.adminCount -eq 1) {
     throw "$UserPrincipalName is an AD protected account (adminCount = 1). Offboard it by hand with a Tier 0 admin account."
@@ -127,10 +127,14 @@ catch { throw "LeaversOU not found: $($cfg.LeaversOU)" }
 $scopes = @('User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
 if ($RemoveAuthMethods) { $scopes += 'UserAuthenticationMethod.ReadWrite.All' }
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes $scopes
-if ((Get-MgContext).Account -eq $UserPrincipalName) {
+$cloud = Get-IamSyncedCloudUser -ObjectGuid $ad.ObjectGUID -ConsistencyGuid $ad.'mS-DS-ConsistencyGuid' -AdUserPrincipalName $UserPrincipalName
+$cloudUpn = $cloud.UserPrincipalName
+if (@($cfg.BreakGlassUpns) -contains $cloudUpn) {
+    throw "$UserPrincipalName signs in to Entra ID as break-glass account $cloudUpn. The leaver script will not touch it."
+}
+if ((Get-MgContext).Account -in @($UserPrincipalName, $cloudUpn)) {
     throw 'You are signed in to Graph as the account you are trying to offboard. Use a different admin account.'
 }
-$cloud = Assert-IamSyncState -UserPrincipalName $UserPrincipalName -Expected Hybrid
 
 # ---- Plan (read-only) ----
 $adGroups = @()
@@ -163,7 +167,7 @@ if ($RemoveAuthMethods) { $authMethods = @(Get-IamUserAuthMethod -UserId $cloud.
 
 $manager = $null
 if ($ConvertMailbox -and -not $DelegateTo -and -not $NoDelegate) { $manager = Get-IamAdManager -DistinguishedName $ad.Manager }
-$mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $UserPrincipalName -ConvertMailbox:$ConvertMailbox -DelegateTo $DelegateTo `
+$mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $cloudUpn -ConvertMailbox:$ConvertMailbox -DelegateTo $DelegateTo `
     -NoDelegate:$NoDelegate -Manager $manager -HasExchangePlan (Test-IamExchangePlan -User $cloudUser) `
     -WillRemoveLicence (-not $KeepLicense -and $directLicences -gt 0)
 $manual += $mbx.Manual
@@ -198,7 +202,7 @@ if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) { retu
 $mailboxOutcome = ''
 if ($mbx.Convert) {
     try {
-        Convert-IamMailboxToShared -Identity $UserPrincipalName -DelegateTo $mbx.Delegate -AutoReplyMessage $AutoReplyMessage -Confirm:$false
+        Convert-IamMailboxToShared -Identity $cloudUpn -DelegateTo $mbx.Delegate -AutoReplyMessage $AutoReplyMessage -Confirm:$false
         $mailboxOutcome = 'Shared' + $(if ($mbx.Delegate) { "; Full Access: $($mbx.Delegate)" } else { '' })
     }
     catch {

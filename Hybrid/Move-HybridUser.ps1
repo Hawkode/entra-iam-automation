@@ -13,6 +13,9 @@
          scope, the sync deletes the cloud account: the script reports it so you can
          restore it from Deleted users.
 
+    The cloud account is found through the source anchor (mS-DS-ConsistencyGuid or
+    objectGUID), so it works when the AD and cloud UPNs differ.
+
     Manager: -Manager sets the AD Manager attribute (must exist and be enabled in AD); it
     syncs to Entra ID with the department. If the department changes without -Manager, the
     script warns that the old manager stays. The leavers use the manager to hand over the
@@ -53,7 +56,7 @@ if (-not $newDept) { throw "Department '$Department' is not in DepartmentOUs. Al
 $newOU = $deptOUs[$newDept]
 
 Import-IamAdModule
-$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Title, MemberOf, Enabled, Manager
+$ad = Get-ADUser -Filter "UserPrincipalName -eq '$UserPrincipalName'" -Properties Department, Title, MemberOf, Enabled, Manager, 'mS-DS-ConsistencyGuid'
 if (-not $ad) { throw "$UserPrincipalName not found in AD." }
 if (-not $ad.Enabled) { throw "$UserPrincipalName is disabled in AD. Movers apply to active users only." }
 try { $null = Get-ADOrganizationalUnit -Identity $newOU }
@@ -70,7 +73,7 @@ $oldManagerUpn = if ($oldManager) { $oldManager.UserPrincipalName } else { '(non
 $managerChange = $newManager -and $ad.Manager -ne $newManager.DistinguishedName
 
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.Read.All', 'GroupMember.Read.All', 'RoleManagement.Read.Directory'
-$cloud = Assert-IamSyncState -UserPrincipalName $UserPrincipalName -Expected Hybrid
+$cloud = Get-IamSyncedCloudUser -ObjectGuid $ad.ObjectGUID -ConsistencyGuid $ad.'mS-DS-ConsistencyGuid' -AdUserPrincipalName $UserPrincipalName
 
 $oldDept = $ad.Department
 $oldOU = ($ad.DistinguishedName -split '(?<!\\),', 2)[1]

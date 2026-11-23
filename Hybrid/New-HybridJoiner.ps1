@@ -21,11 +21,12 @@
     soft-match the new AD account onto that cloud account and take it over.
 
     DefaultDomain must be a UPN suffix in AD (AD Domains and Trusts) and a verified
-    domain in Entra ID. Otherwise the user syncs as @<tenant>.onmicrosoft.com.
+    domain in Entra ID. Otherwise the user syncs as @<tenant>.onmicrosoft.com. The
+    script checks both before it creates anything.
 
     Temporary passwords are shown once in the console, never logged or written to CSV.
 
-    Graph scopes (delegated): User.ReadWrite.All, LicenseAssignment.Read.All
+    Graph scopes (delegated): User.ReadWrite.All, LicenseAssignment.Read.All, User.Read (verified domains)
     AD rights: create users in the DepartmentOUs. Entra Connect server: WinRM and ADSyncOperators.
 
 .PARAMETER Manager
@@ -148,7 +149,10 @@ if ($PSCmdlet.ParameterSetName -ne 'Resume') {
     }
 }
 
-Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.ReadWrite.All', 'LicenseAssignment.Read.All'
+Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.ReadWrite.All', 'LicenseAssignment.Read.All', 'User.Read'
+
+# The AD check above also passes the AD DNS root, which is often not a verified domain.
+if ($PSCmdlet.ParameterSetName -ne 'Resume') { Assert-IamVerifiedDomain -Domain $domain }
 
 foreach ($p in $plan) {
     $cloud = Get-MgUser -Filter "userPrincipalName eq '$($p.Upn)'" -Property Id, OnPremisesSyncEnabled

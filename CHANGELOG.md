@@ -4,12 +4,23 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+Fixes from testing the hybrid scripts against AD DS and Entra Connect in the hybrid lab.
+
 ### Added
 - Pester 5 tests for the shared module (`tests/`), run by CI on Windows PowerShell 5.1 and PowerShell 7. Graph and Exchange are mocked.
 - `build/Invoke-Tests.ps1`: installs pinned Pester and runs the tests.
+- Shared module: `Assert-IamGraphHost`, `Assert-IamVerifiedDomain`, `ConvertTo-IamImmutableId`, `Get-IamSyncedCloudUser`, with tests.
 
 ### Changed
+- PowerShell 7 is required. `Connect-IamGraph` stops on Windows PowerShell 5.1 before sign-in, where Graph SDK 2.34 and later fail with `RefreshCacheAsync ... does not have an implementation`.
+- Hybrid mover and leaver find the cloud account through the source anchor (`mS-DS-ConsistencyGuid`, or `objectGUID`) instead of the UPN, so they work when the AD and cloud UPNs differ.
+- Hybrid leaver: break-glass and signed-in admin checks also use the cloud UPN, and the mailbox steps use the cloud UPN.
+- Hybrid joiner asks for `User.Read`, to read the tenant's verified domains.
+- README: hybrid status from the lab run, PowerShell 7 requirement, source anchor note.
 - CI workflow renamed from `lint` to `ci`, with a test job next to PSScriptAnalyzer.
+
+### Fixed
+- Hybrid joiner: `DefaultDomain` set to the AD DNS root passed the UPN suffix check, then the user synced as `@<tenant>.onmicrosoft.com` and the wait step could not find it. The joiner now also checks that the domain is verified in Entra ID, before it creates anything.
 
 ## [1.3.0] - 2026-11-10
 

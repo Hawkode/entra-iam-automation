@@ -27,7 +27,8 @@ jobs:
           if ($r) { exit 1 }
 
   test:
-    # The scripts support Windows PowerShell 5.1 and PowerShell 7, so the tests run in both.
+    # The shared module loads in Windows PowerShell 5.1 and PowerShell 7, so the tests run in both.
+    # Graph sign-in needs PowerShell 7 (Assert-IamGraphHost).
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:

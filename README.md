@@ -17,7 +17,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `samples/` | Example input files (fake names only) |
 
 ## Requirements
-- Windows PowerShell 5.1 or PowerShell 7.
+- PowerShell 7. The Microsoft Graph SDK (2.34 and later) cannot sign in on Windows PowerShell 5.1, so every script that signs in stops there before it changes anything.
 - Microsoft Graph PowerShell SDK: `Install-Module Microsoft.Graph -Scope CurrentUser`
 - For the leavers' `-ConvertMailbox` only: `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
@@ -82,7 +82,7 @@ Both joiners take `-Manager <upn>` (or a `Manager` CSV column). Both movers take
 ## Hybrid lifecycle
 | Script | Does | Graph scopes |
 |---|---|---|
-| `New-HybridJoiner.ps1` | Creates the user in AD in the department's OU, runs a delta sync, waits for the user in Entra ID, sets usage location and assigns the licence. `-ResumeUserPrincipalName` finishes the cloud steps later if the sync is slow | `User.ReadWrite.All`, `LicenseAssignment.Read.All` |
+| `New-HybridJoiner.ps1` | Creates the user in AD in the department's OU, runs a delta sync, waits for the user in Entra ID, sets usage location and assigns the licence. `-ResumeUserPrincipalName` finishes the cloud steps later if the sync is slow | `User.ReadWrite.All`, `LicenseAssignment.Read.All`, `User.Read` |
 | `Move-HybridUser.ps1` | Changes department and title in AD, moves the account to the new department's OU, syncs. Lists AD groups, cloud-only groups and roles that do not move | `User.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` (read-only) |
 | `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
 
@@ -90,7 +90,9 @@ Both joiners take `-Manager <upn>` (or a `Manager` CSV column). Both movers take
 - RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
 - An on-prem account with delegated rights on the OUs in `DepartmentOUs` and `LeaversOU`: create, edit, move, disable and reset password on users, and remove members from their groups. Not Domain Admin.
 - WinRM to `EntraConnectServer`, and membership of `ADSyncOperators` (or local admin) on it.
-- `DefaultDomain` must be a UPN suffix in AD (AD Domains and Trusts) and a verified domain in Entra ID. The joiner checks the AD side.
+- `DefaultDomain` must be a UPN suffix in AD (AD Domains and Trusts) and a verified domain in Entra ID. The joiner checks both before it creates anything. The AD DNS root (for example `contoso.local`) passes the AD check but is usually not verified, and users would sync as `@<tenant>.onmicrosoft.com`.
+- The mover and leaver find the cloud account through the source anchor (`mS-DS-ConsistencyGuid`, or `objectGUID` if it is empty), not the UPN, so they work when the AD and cloud UPNs differ. A custom source anchor (for example `employeeID`) is not supported.
+- PowerShell 7. The ADSync module on the Entra Connect server only loads in Windows PowerShell 5.1, which is why the scripts start the sync with `Invoke-Command`.
 
 ### Check the Leavers OU sync scope first
 On the Entra Connect server: Microsoft Entra Connect > **Configure** > **Customize synchronization options** > **Domain and OU filtering**. Read the setting, then **Cancel**.
@@ -116,7 +118,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 
 ## Safety controls
 - **Config check:** every script validates the config values it needs before signing in.
-- **Sync guard:** Cloud scripts stop on users synced from AD. Hybrid scripts stop on cloud-only users.
+- **Sync guard:** Cloud scripts stop on users synced from AD. Hybrid scripts stop on cloud-only users, and on synced users they cannot match by source anchor.
 - **Soft-match guard:** the hybrid joiner stops if the UPN already exists in Entra ID, because Entra Connect would match the new AD account onto that cloud account and take it over.
 - **Department allowlist:** departments must match `AllowedDepartments` (cloud) or a key of `DepartmentOUs` (hybrid), so a typo cannot create a user outside every dynamic group.
 - **Validate first:** the joiner checks every row, UPN and manager before creating anything. One bad row, nothing created. The mover checks the new manager before changing anything.
@@ -189,12 +191,14 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences). Group-assigned licences, `-RemoveAuthMethods` and `-ConvertMailbox` tested offline only |
-| Hybrid/New-HybridJoiner.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
-| Hybrid/Move-HybridUser.ps1 | Done, tested offline with AD and Graph mocked. Not yet tested against a real domain |
-| Hybrid/Disable-HybridLeaver.ps1 | Done, tested offline with AD, Graph and Exchange mocked. Not yet tested against a real domain |
+| Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. CSV and `-ResumeUserPrincipalName` untested live. Verified-domain check added after the lab run, tested offline |
+| Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard. Source-anchor lookup added after the lab run, tested offline |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). `-ConvertMailbox` tested offline only (no Exchange in the lab). Source-anchor lookup added after the lab run, tested offline |
+
+Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
 
 ## Tests
-[`tests/IamAutomation.Common.Tests.ps1`](tests/IamAutomation.Common.Tests.ps1) covers the shared module with Pester 5: UPN building and accent stripping, password generation, config validation, output files, the leaver mailbox plan, the cloud and hybrid sync-state guard, and the retry when Graph refuses to delete the default MFA method. Graph and Exchange calls are mocked, so the tests need no tenant. CI runs them on Windows PowerShell 5.1 and PowerShell 7, after PSScriptAnalyzer.
+[`tests/IamAutomation.Common.Tests.ps1`](tests/IamAutomation.Common.Tests.ps1) covers the shared module with Pester 5: UPN building and accent stripping, password generation, config validation, output files, the leaver mailbox plan, the cloud and hybrid sync-state guard, the source-anchor lookup, the verified-domain check, the PowerShell 7 check, and the retry when Graph refuses to delete the default MFA method. Graph and Exchange calls are mocked, so the tests need no tenant. CI runs them on Windows PowerShell 5.1 and PowerShell 7, after PSScriptAnalyzer: the shared module still loads on 5.1, only Graph sign-in needs 7.
 
 Run them locally (installs Pester 5.9.1 for the current user):
 ```powershell

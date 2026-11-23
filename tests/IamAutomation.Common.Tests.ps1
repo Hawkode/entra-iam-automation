@@ -15,6 +15,11 @@ BeforeAll {
             param([string]$UserId, [string]$Filter, [string[]]$Property)
             throw "Get-MgUser reached without a mock: $UserId $Filter $Property"
         }
+        function Get-MgOrganization {
+            [CmdletBinding()]
+            param([string[]]$Property)
+            throw "Get-MgOrganization reached without a mock: $Property"
+        }
         function Invoke-MgGraphRequest {
             [CmdletBinding()]
             param([string]$Method, [string]$Uri, [object]$Body, [string]$ContentType)
@@ -513,5 +518,86 @@ Describe 'Wait-IamCloudUser' {
     It 'returns nothing at timeout' {
         Mock Get-MgUser -ModuleName IamAutomation.Common -MockWith { [pscustomobject]@{ Id = 'u1'; AccountEnabled = $true } }
         Wait-IamCloudUser -UserId 'u1' -Until { param($user) -not $user.AccountEnabled } -TimeoutSeconds 0 | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Assert-IamGraphHost' {
+    It 'stops on Windows PowerShell 5.1' {
+        { Assert-IamGraphHost -Edition Desktop } | Should -Throw '*needs PowerShell 7*'
+    }
+
+    It 'passes on PowerShell 7' {
+        { Assert-IamGraphHost -Edition Core } | Should -Not -Throw
+    }
+}
+
+Describe 'Assert-IamVerifiedDomain' {
+    BeforeEach {
+        Mock Get-MgOrganization -ModuleName IamAutomation.Common -MockWith {
+            [pscustomobject]@{
+                Id              = 'org1'
+                VerifiedDomains = @(
+                    [pscustomobject]@{ Name = 'lab.example.org' }
+                    [pscustomobject]@{ Name = 'labtenant.onmicrosoft.com' }
+                )
+            }
+        }
+    }
+
+    It 'passes a verified domain, any case' {
+        { Assert-IamVerifiedDomain -Domain 'Lab.Example.ORG' } | Should -Not -Throw
+    }
+
+    It 'stops on an AD-only suffix such as the AD DNS root' {
+        { Assert-IamVerifiedDomain -Domain 'lab.local' } | Should -Throw "*'lab.local' is not a verified domain*"
+    }
+}
+
+Describe 'ConvertTo-IamImmutableId' {
+    It 'uses objectGUID in AD byte order when mS-DS-ConsistencyGuid is empty' {
+        ConvertTo-IamImmutableId -ObjectGuid '00112233-4455-6677-8899-aabbccddeeff' | Should -BeExactly 'MyIRAFVEd2aImaq7zN3u/w=='
+    }
+
+    It 'prefers mS-DS-ConsistencyGuid when it is set' {
+        $consistency = [byte[]](0..15)
+        ConvertTo-IamImmutableId -ObjectGuid '00112233-4455-6677-8899-aabbccddeeff' -ConsistencyGuid $consistency |
+            Should -BeExactly 'AAECAwQFBgcICQoLDA0ODw=='
+    }
+}
+
+Describe 'Get-IamSyncedCloudUser' {
+    BeforeEach {
+        Mock Write-IamLog -ModuleName IamAutomation.Common
+        $script:guid = '00112233-4455-6677-8899-aabbccddeeff'
+    }
+
+    It 'finds the account by source anchor, not by UPN' {
+        Mock Get-MgUser -ModuleName IamAutomation.Common -ParameterFilter { $Filter -eq "onPremisesImmutableId eq 'MyIRAFVEd2aImaq7zN3u/w=='" } -MockWith {
+            [pscustomobject]@{ Id = 'u1'; UserPrincipalName = 'jdoe@lab.example.org'; OnPremisesSyncEnabled = $true }
+        }
+        (Get-IamSyncedCloudUser -ObjectGuid $script:guid -AdUserPrincipalName 'jdoe@lab.example.org').Id | Should -Be 'u1'
+        Should -Invoke Write-IamLog -ModuleName IamAutomation.Common -Times 0 -Exactly
+    }
+
+    It 'logs the cloud UPN when it differs from the AD UPN' {
+        Mock Get-MgUser -ModuleName IamAutomation.Common -MockWith {
+            [pscustomobject]@{ Id = 'u1'; UserPrincipalName = 'jdoe@labtenant.onmicrosoft.com'; OnPremisesSyncEnabled = $true }
+        }
+        (Get-IamSyncedCloudUser -ObjectGuid $script:guid -AdUserPrincipalName 'jdoe@lab.local').UserPrincipalName | Should -Be 'jdoe@labtenant.onmicrosoft.com'
+        Should -Invoke Write-IamLog -ModuleName IamAutomation.Common -Times 1 -Exactly -ParameterFilter {
+            $Message -like '*signs in to Entra ID as jdoe@labtenant.onmicrosoft.com*'
+        }
+    }
+
+    It 'stops when no account has the source anchor' {
+        Mock Get-MgUser -ModuleName IamAutomation.Common -MockWith { }
+        { Get-IamSyncedCloudUser -ObjectGuid $script:guid -AdUserPrincipalName 'jdoe@lab.example.org' } | Should -Throw '*has no Entra ID account with source anchor*'
+    }
+
+    It 'stops when the matched account is no longer synced' {
+        Mock Get-MgUser -ModuleName IamAutomation.Common -MockWith {
+            [pscustomobject]@{ Id = 'u1'; UserPrincipalName = 'jdoe@lab.example.org'; OnPremisesSyncEnabled = $null }
+        }
+        { Get-IamSyncedCloudUser -ObjectGuid $script:guid -AdUserPrincipalName 'jdoe@lab.example.org' } | Should -Throw '*sync is off*'
     }
 }
