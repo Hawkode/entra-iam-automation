@@ -4,6 +4,8 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-23
+
 Fixes from testing the hybrid scripts against AD DS and Entra Connect in the hybrid lab.
 
 ### Added
