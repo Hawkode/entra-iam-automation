@@ -4,13 +4,20 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
-### Fixed
-- `Get-StaleAccounts.ps1 -IncludeOnPrem`: matched AD accounts by the cloud UPN, so synced users whose AD UPN differs got no AD logon and could show as stale. Now matched through the source anchor, with one AD query instead of one per user. Found in the hybrid lab.
-- `Get-StaleAccounts.ps1`: `DaysSince` is a whole number (it printed `10.00`).
+## [1.4.1] - 2026-11-23
+
+One fix found while testing the remaining options in the hybrid lab.
 
 ### Added
 - `Get-StaleAccounts.ps1`: `InAd` column, and a warning listing synced users not found in the AD domain it ran against.
 - Shared module: `New-IamAdAnchorMap`, with tests.
+
+### Changed
+- README: status for `Get-StaleAccounts.ps1 -IncludeOnPrem` and `Disable-CloudLeaver.ps1 -RemoveAuthMethods`, both tested in the lab.
+
+### Fixed
+- `Get-StaleAccounts.ps1 -IncludeOnPrem`: matched AD accounts by the cloud UPN, so synced users whose AD UPN differs got no AD logon and could show as stale. Now matched through the source anchor, with one AD query instead of one per user. Found in the hybrid lab.
+- `Get-StaleAccounts.ps1`: `DaysSince` is a whole number (it printed `10.00`).
 
 ## [1.4.0] - 2026-11-23
 
