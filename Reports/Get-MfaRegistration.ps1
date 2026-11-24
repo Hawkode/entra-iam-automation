@@ -90,7 +90,7 @@ $rank = @{ 'Break-glass without phishing-resistant' = 0; 'No MFA' = 1; 'Admin wi
 $report = @($report | Sort-Object -Property @{ Expression = { if ($rank.ContainsKey($_.Finding)) { $rank[$_.Finding] } else { 9 } } }, DisplayName)
 
 $csv = Get-IamOutputPath -Prefix 'MfaRegistration'
-$report | Export-Csv -Path $csv -NoTypeInformation
+$report | Export-Csv -Path $csv
 
 $counts = $report | Where-Object { $rank.ContainsKey($_.Finding) } | Group-Object -Property Finding |
     ForEach-Object { "$($_.Name) $($_.Count)" }

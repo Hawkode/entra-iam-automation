@@ -106,7 +106,7 @@ if ($review.Count -gt 0) {
 
     $csv = Get-IamOutputPath -Prefix 'MoverReview'
     $review | Select-Object @{ n = 'Upn'; e = { $UserPrincipalName } }, @{ n = 'From'; e = { $oldDept } },
-    @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -NoTypeInformation -WhatIf:$false
+    @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -WhatIf:$false
     Write-IamLog -Message "Review list: $csv"
 
     $review | Format-Table Type, Name -AutoSize

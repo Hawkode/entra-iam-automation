@@ -94,8 +94,13 @@ function Export-IamCsv {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$InputObject,
         [Parameter(Mandatory)][string]$Path
     )
-    $encoding = if ($PSVersionTable.PSVersion.Major -ge 6) { 'utf8BOM' } else { 'UTF8' }
-    $InputObject | Export-Csv -Path $Path -NoTypeInformation -Encoding $encoding -WhatIf:$false
+    $csvArgs = @{ Path = $Path; Encoding = 'utf8BOM'; WhatIf = $false }
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+        # PowerShell 7 never writes the #TYPE line, and 7.6 warns that -NoTypeInformation is obsolete.
+        $csvArgs.Encoding = 'UTF8'
+        $csvArgs.NoTypeInformation = $true
+    }
+    $InputObject | Export-Csv @csvArgs
 }
 
 function Invoke-IamGraphGetAll {

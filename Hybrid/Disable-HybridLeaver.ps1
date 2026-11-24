@@ -324,7 +324,7 @@ $csv = Get-IamOutputPath -Prefix 'HybridLeaver'
     AuthMethods          = ($authRemoved -join '; ')
     Mailbox              = $mailboxOutcome
     ManualFollowUp       = ($manual -join '; ')
-} | Export-Csv -Path $csv -NoTypeInformation
+} | Export-Csv -Path $csv
 
 if ($manual.Count) {
     Write-IamLog -Level WARN -Message "Leaver done with $($manual.Count) manual item(s) for ${UserPrincipalName}. CSV: $csv"

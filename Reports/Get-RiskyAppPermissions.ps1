@@ -130,7 +130,7 @@ foreach ($app in ($tenantWide | Group-Object -Property App)) {
 }
 
 $csv = Get-IamOutputPath -Prefix 'RiskyAppPermissions'
-$report | Export-Csv -Path $csv -NoTypeInformation
+$report | Export-Csv -Path $csv
 
 $crit = @($report | Where-Object Risk -EQ 'Critical').Count
 $high = @($report | Where-Object Risk -EQ 'High').Count

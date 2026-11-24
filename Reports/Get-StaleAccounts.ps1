@@ -107,7 +107,7 @@ $report = foreach ($u in $users) {
 $report = @($report | Sort-Object -Property @{ Expression = { $_.Finding -in 'Stale', 'Never signed in' }; Descending = $true }, DisplayName)
 
 $csv = Get-IamOutputPath -Prefix 'StaleAccounts'
-$report | Export-Csv -Path $csv -NoTypeInformation
+$report | Export-Csv -Path $csv
 
 $stale = @($report | Where-Object { $_.Finding -in 'Stale', 'Never signed in' }).Count
 Write-IamLog -Message "Stale accounts (threshold $StaleDays days): $stale of $($report.Count). On-prem check: $IncludeOnPrem. CSV: $csv"

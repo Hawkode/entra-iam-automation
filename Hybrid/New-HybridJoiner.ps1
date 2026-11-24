@@ -42,6 +42,10 @@
 .PARAMETER SkipLicense
     Do not assign a licence (for example, group-based licensing).
 
+.PARAMETER PassThru
+    Return the results (including TempPassword) as objects instead of the table and warning,
+    for a caller such as a GUI. The CSV still leaves the passwords out.
+
 .EXAMPLE
     .\Hybrid\New-HybridJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -WhatIf
 .EXAMPLE
@@ -61,6 +65,7 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Csv')][string]$CsvPath,
     [Parameter(Mandatory, ParameterSetName = 'Resume')][string[]]$ResumeUserPrincipalName,
     [switch]$SkipLicense,
+    [switch]$PassThru,
     [int]$SyncTimeoutSeconds = 600
 )
 
@@ -256,10 +261,11 @@ $results = foreach ($t in $targets) {
 
 $results = @($results)
 $csv = Get-IamOutputPath -Prefix 'HybridJoiners'
-$results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv -NoTypeInformation
+$results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv
 Write-IamLog -Message "Hybrid joiners processed: $($results.Count). CSV (no passwords): $csv"
 
-if ($PSCmdlet.ParameterSetName -eq 'Resume') {
+if ($PassThru) { $results }
+elseif ($PSCmdlet.ParameterSetName -eq 'Resume') {
     $results | Format-Table Upn, Cloud, Licence -AutoSize
 }
 else {

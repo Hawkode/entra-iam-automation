@@ -139,7 +139,7 @@ if ($review.Count -gt 0) {
     Write-IamLog -Level WARN -Message "$($review.Count) item(s) do not follow the move for ${UserPrincipalName}. Review with the new manager: $summary"
     $csv = Get-IamOutputPath -Prefix 'HybridMoverReview'
     $review | Select-Object @{ n = 'Upn'; e = { $UserPrincipalName } }, @{ n = 'From'; e = { $oldDept } },
-    @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -NoTypeInformation -WhatIf:$false
+    @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -WhatIf:$false
     Write-IamLog -Message "Review list: $csv"
     $review | Format-Table Type, Name -AutoSize
 }

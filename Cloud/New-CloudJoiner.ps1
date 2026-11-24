@@ -33,6 +33,11 @@
 .PARAMETER SkipLicense
     Create the users without assigning a licence (for example, group-based licensing).
 
+.PARAMETER PassThru
+    Return the results (DisplayName, Upn, Department, Licence, Manager, TempPassword, Id) as
+    objects instead of the table and warning, for a caller such as a GUI. The CSV still leaves
+    the passwords out.
+
 .EXAMPLE
     .\Cloud\New-CloudJoiner.ps1 -GivenName Oliver -Surname Bennett -Department Engineering -WhatIf
 .EXAMPLE
@@ -48,7 +53,8 @@ param(
     [Parameter(ParameterSetName = 'Single')][string]$JobTitle,
     [Parameter(ParameterSetName = 'Single')][string]$Manager,
     [Parameter(Mandatory, ParameterSetName = 'Csv')][string]$CsvPath,
-    [switch]$SkipLicense
+    [switch]$SkipLicense,
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -189,9 +195,12 @@ $results = foreach ($p in $plan) {
 $results = @($results)
 if ($results.Count -gt 0) {
     $csv = Get-IamOutputPath -Prefix 'Joiners'
-    $results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv -NoTypeInformation
+    $results | Select-Object -Property * -ExcludeProperty TempPassword | Export-Csv -Path $csv
     Write-IamLog -Message "Joiners created: $($results.Count). CSV (no passwords): $csv"
 
-    $results | Format-Table DisplayName, Upn, Department, Manager, Licence, TempPassword -AutoSize
-    Write-Warning 'Temporary passwords are shown once. Pass them on through a one-time secret link, not email or chat.'
+    if ($PassThru) { $results }
+    else {
+        $results | Format-Table DisplayName, Upn, Department, Manager, Licence, TempPassword -AutoSize
+        Write-Warning 'Temporary passwords are shown once. Pass them on through a one-time secret link, not email or chat.'
+    }
 }

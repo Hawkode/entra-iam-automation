@@ -116,7 +116,7 @@ foreach ($f in $report | Where-Object Finding -EQ 'Standing privileged access') 
 }
 
 $csv = Get-IamOutputPath -Prefix 'StandingAdmins'
-$report | Export-Csv -Path $csv -NoTypeInformation
+$report | Export-Csv -Path $csv
 
 $standing = @($report | Where-Object Finding -EQ 'Standing privileged access').Count
 Write-IamLog -Message "Role assignments: $($report.Count) rows, $standing standing privileged. PIM data: $pimAvailable. CSV: $csv"

@@ -4,6 +4,14 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-24
+
+### Added
+- Both joiners: `-PassThru` returns the results, temporary password included, as objects instead of the table and warning, so a GUI or another script can show them. The CSV still leaves passwords out.
+
+### Fixed
+- PowerShell 7.6 warned that `Export-Csv -NoTypeInformation` is obsolete, in every report and lifecycle script. Removed from the scripts (PowerShell 7 never writes the `#TYPE` line). `Export-IamCsv` still adds it on Windows PowerShell 5.1.
+
 ## [1.5.0] - 2026-11-24
 
 Setup script, so a new install no longer means filling in the config by hand. Tested in the hybrid lab.

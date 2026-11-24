@@ -237,7 +237,7 @@ $csv = Get-IamOutputPath -Prefix 'Leaver'
     Mailbox        = $mailboxOutcome
     OldDepartment  = $user.Department
     ManualFollowUp = ($manual -join '; ')
-} | Export-Csv -Path $csv -NoTypeInformation
+} | Export-Csv -Path $csv
 
 if ($manual.Count) {
     Write-IamLog -Level WARN -Message "Leaver done with $($manual.Count) manual item(s) for ${UserPrincipalName}. CSV: $csv"

@@ -63,7 +63,7 @@ $report = foreach ($u in $users) {
 $report = @($report | Sort-Object -Property @{ Expression = { $_.Finding -in 'No manager', 'Manager disabled' }; Descending = $true }, DisplayName)
 
 $csv = Get-IamOutputPath -Prefix 'ManagerCoverage'
-$report | Export-Csv -Path $csv -NoTypeInformation
+$report | Export-Csv -Path $csv
 
 $missing = @($report | Where-Object { $_.Finding -eq 'No manager' }).Count
 $disabled = @($report | Where-Object { $_.Finding -eq 'Manager disabled' }).Count
