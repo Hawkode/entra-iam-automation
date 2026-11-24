@@ -704,7 +704,7 @@ Describe 'ConvertFrom-IamMsolDescription' {
         ConvertFrom-IamMsolDescription -Description $d | Should -Be 'SYNC01'
     }
 
-    It 'returns nothing without a server name' -ForEach @(
+    It 'returns nothing for ''<Value>''' -ForEach @(
         @{ Value = 'Service account' }
         @{ Value = '' }
     ) {

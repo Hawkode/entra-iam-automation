@@ -189,7 +189,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
-| Setup/New-IamConfig.ps1 | Done, helpers tested offline (Pester). Not run against a tenant, AD or Entra Connect yet |
+| Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab |
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` tested in hybrid lab, including a user whose AD and cloud UPNs differ |

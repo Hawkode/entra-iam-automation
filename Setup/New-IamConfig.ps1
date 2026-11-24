@@ -60,6 +60,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Path $PSScriptRoot -Parent
 Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation.Common.psm1') -Force
+Assert-IamGraphHost
 if (-not $Path) { $Path = Join-Path -Path $repoRoot -ChildPath 'config.local.psd1' }
 
 #region Prompt helpers
@@ -178,7 +179,8 @@ if (-not (Read-SetupYesNo -Prompt 'Is this the tenant the config is for?' -Defau
 $config.TenantId = "$($ctx.TenantId)"; $source.TenantId = 'found'
 
 # DefaultDomain: default domain first, then by name.
-$domains = @($org.verifiedDomains | Sort-Object -Property @{ Expression = { -not $_.isDefault } }, @{ Expression = { $_.name } })
+# *.mail.onmicrosoft.com is the Exchange Online mail routing domain, never a UPN domain.
+$domains = @($org.verifiedDomains | Where-Object { "$($_.name)" -notlike '*.mail.onmicrosoft.com' } | Sort-Object -Property @{ Expression = { -not $_.isDefault } }, @{ Expression = { $_.name } })
 $domainNames = @($domains | ForEach-Object { "$($_.name)" })
 $current = Get-SetupCurrent -Key DefaultDomain
 if ($domainNames.Count -eq 1) {
@@ -336,6 +338,7 @@ else {
     Show-SetupHeading 'Department OUs (DepartmentOUs)'
     $currentMap = Get-SetupCurrent -Key DepartmentOUs
     $map = [ordered]@{}
+    $noOu = @()
     foreach ($dept in $config.AllowedDepartments) {
         $hits = @($ous | Where-Object { $_.Name -eq $dept } | ForEach-Object { $_.DistinguishedName })
         $previous = if ($currentMap -and $currentMap.ContainsKey($dept)) { "$($currentMap[$dept])" } else { '' }
@@ -345,7 +348,10 @@ else {
             $map[$dept] = Read-SetupChoice -Prompt "OU for $dept" -Option $hits -Default ([Math]::Max(0, [array]::IndexOf($hits, $previous)))
         }
         elseif ($previous) { $map[$dept] = $previous }
-        else { Show-SetupLine "No OU named $dept. The hybrid joiner and mover refuse this department until it is in DepartmentOUs." }
+        else { $noOu += $dept }
+    }
+    if ($noOu.Count) {
+        Show-SetupLine "No OU named: $($noOu -join ', '). The hybrid joiner and mover refuse these departments until they are in DepartmentOUs."
     }
     foreach ($dept in $map.Keys) { Show-SetupLine "  $dept -> $($map[$dept])" }
     $config.DepartmentOUs = $map; $source.DepartmentOUs = 'found'
@@ -481,7 +487,7 @@ $text = $header + [Environment]::NewLine + (ConvertTo-IamConfigText -Config $con
 
 Show-SetupHeading 'Result'
 $summary = foreach ($k in $config.Keys) {
-    [pscustomobject]@{ Key = $k; Value = (Format-SetupValue -Value $config[$k]); Source = $source[$k] }
+    [pscustomobject]@{ Key = $k; Source = $source[$k]; Value = (Format-SetupValue -Value $config[$k]) }
 }
 Show-SetupLine ($summary | Format-Table -AutoSize -Wrap | Out-String)
 
@@ -499,7 +505,7 @@ if ($PSCmdlet.ShouldProcess($Path, 'Write config')) {
         if ($backup) { Copy-Item -Path $backup -Destination $Path -Force }
         throw "Writing $Path failed, the previous file is back in place: $($_.Exception.Message)"
     }
-    $by = $source.Values | Group-Object | ForEach-Object { "$($_.Name): $($_.Count)" }
+    $by = $source.Values | ForEach-Object { ("$_" -split '[ ,]')[0] } | Group-Object | ForEach-Object { "$($_.Name): $($_.Count)" }
     Write-IamLog -Message "Config written to $Path (backup: $(if ($backup) { $backup } else { 'none' })). Keys by source: $($by -join ', ')"
     Show-SetupLine 'Next: run a read-only report to prove sign-in and consent, e.g. .\Reports\Get-RiskyAppPermissions.ps1'
 }

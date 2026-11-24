@@ -4,12 +4,12 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
-## [1.5.0] - 2026-11-23
+## [1.5.0] - 2026-11-24
 
-Setup script, so a new install no longer means filling in the config by hand.
+Setup script, so a new install no longer means filling in the config by hand. Tested in the hybrid lab.
 
 ### Added
-- `Setup/New-IamConfig.ps1`: builds `config.local.psd1` from Entra ID, AD and Entra Connect, read-only. Asks only for what it cannot find, shows the result, backs up the old file and writes after confirmation. Keeps keys it does not know. `-SkipHybrid` for cloud-only tenants or machines without RSAT.
+- `Setup/New-IamConfig.ps1`: builds `config.local.psd1` from Entra ID, AD and Entra Connect, read-only. Asks only for what it cannot find, shows the result, backs up the old file and writes after confirmation. Keeps keys it does not know. `-SkipHybrid` for cloud-only tenants or machines without RSAT. Stops on Windows PowerShell 5.1 before reading anything, and leaves the Exchange mail routing domain (`*.mail.onmicrosoft.com`) out of the domain list.
 - Shared module: `ConvertTo-IamConfigText`, `Test-IamOuInSyncScope`, `ConvertFrom-IamMsolDescription`, `Get-IamUpnFormatGuess`, `Get-IamBreakGlassCandidate`, with tests.
 
 ### Changed
