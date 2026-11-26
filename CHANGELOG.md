@@ -9,6 +9,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 ### Added
 - Both leavers: `-PassThru` returns one result object, so a GUI or another script can show it. Under `-WhatIf`: `Upn`, `Applied` (`$false`), `Plan` (the steps) and `Manual` (follow-up items), plus `AlreadyDisabled` (cloud) or `FromOU` and `ToOU` (hybrid). After a run: the CSV row plus `Applied`, `Plan`, `Manual` and `Csv`. A caller with no console passes `-Confirm:$false`.
 
+### Tested in the lab
+- Both leavers' `-PassThru` through the IAM console: cloud preview and run (password reset, TAP removed, licence removed), hybrid preview and run (AD disable, Leavers OU, delta sync, disabled in Entra ID, licence removed).
+
 ### Security
 - `Disable-CloudLeaver.ps1` resets the password to a random 32-character value right after disabling, like the hybrid leaver already does in AD. Re-enabling the account by mistake no longer brings the old password back. Needs the `User-PasswordProfile.ReadWrite.All` scope (new). A failed reset is reported as a manual item and the run carries on to revoke sessions.
 
