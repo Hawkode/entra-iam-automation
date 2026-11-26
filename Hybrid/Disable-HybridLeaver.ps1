@@ -74,6 +74,11 @@
 .PARAMETER HideFromGal
     Hide from the address list. For synced users this is set in AD (msExchHideFromAddressLists),
     which only exists if the Exchange schema extension is in AD.
+.PARAMETER PassThru
+    Return one result object, for a caller such as a GUI. Under -WhatIf: Upn, Applied
+    ($false), Plan (the steps), Manual (follow-up items), FromOU and ToOU. After a run: the CSV row
+    plus Applied, Plan, Manual and Csv. Pass -Confirm:$false from a caller with no
+    console to answer the confirmation.
 
 .EXAMPLE
     .\Hybrid\Disable-HybridLeaver.ps1 -UserPrincipalName stefan.ionescu@contoso.com -Ticket INC12345 -WhatIf
@@ -91,6 +96,7 @@ param(
     [switch]$NoDelegate,
     [string]$AutoReplyMessage,
     [switch]$HideFromGal,
+    [switch]$PassThru,
     [int]$SyncTimeoutSeconds = 600
 )
 
@@ -196,7 +202,12 @@ elseif (-not $mbx.ForceKeepLicence) { $plan += 'remove direct licences' }
 Write-IamLog -Message "Leaver plan for ${UserPrincipalName}: $($plan -join '; ')"
 foreach ($item in $manual) { Write-IamLog -Level WARN -Message "Manual follow-up for ${UserPrincipalName}: $item" }
 
-if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) { return }
+if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) {
+    if ($PassThru) {
+        [pscustomobject]@{ Upn = $UserPrincipalName; Applied = $false; Plan = @($plan); Manual = @($manual); FromOU = ($oldDN -split '(?<!\\),', 2)[1]; ToOU = $cfg.LeaversOU }
+    }
+    return
+}
 
 # ---- Exchange (optional): first, while the cloud account certainly still exists ----
 $mailboxOutcome = ''
@@ -310,7 +321,7 @@ else {
 }
 
 $csv = Get-IamOutputPath -Prefix 'HybridLeaver'
-[pscustomobject]@{
+$row = [pscustomobject]@{
     Upn                  = $UserPrincipalName
     Ticket               = $Ticket
     Operator             = [Environment]::UserName
@@ -324,7 +335,8 @@ $csv = Get-IamOutputPath -Prefix 'HybridLeaver'
     AuthMethods          = ($authRemoved -join '; ')
     Mailbox              = $mailboxOutcome
     ManualFollowUp       = ($manual -join '; ')
-} | Export-Csv -Path $csv
+}
+$row | Export-Csv -Path $csv
 
 if ($manual.Count) {
     Write-IamLog -Level WARN -Message "Leaver done with $($manual.Count) manual item(s) for ${UserPrincipalName}. CSV: $csv"
@@ -332,4 +344,8 @@ if ($manual.Count) {
 }
 else {
     Write-IamLog -Message "Leaver done for ${UserPrincipalName}, no manual items. CSV: $csv"
+}
+
+if ($PassThru) {
+    $row | Add-Member -NotePropertyMembers ([ordered]@{ Applied = $true; Plan = @($plan); Manual = @($manual); Csv = $csv }) -PassThru
 }

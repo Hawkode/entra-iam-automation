@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.5.2` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.5.3` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.5.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.5.3 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -85,7 +85,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Move-CloudUser.ps1` | Changes department so dynamic groups re-scope access, lists assigned groups and roles that do not move | `User.ReadWrite.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` |
 | `Disable-CloudLeaver.ps1` | Disables, revokes sessions, removes assigned groups and direct licences, clears department. Options below | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
 
-Both joiners take `-Manager <upn>` (or a `Manager` CSV column), and `-PassThru` to return the results with the temporary password as objects instead of a table, for a GUI or another script. Both movers take `-Manager` too, and warn when the department changes but the manager does not. Both movers also take `-PassThru`: one result object (plan, before and after, review items, CSV path, and for hybrid the OU and sync result) instead of the table, also under `-WhatIf`. The leavers use the manager to hand over the mailbox.
+Both joiners take `-Manager <upn>` (or a `Manager` CSV column), and `-PassThru` to return the results with the temporary password as objects instead of a table, for a GUI or another script. Both movers take `-Manager` too, and warn when the department changes but the manager does not. Both leavers take `-PassThru` too: the plan and manual items under `-WhatIf`, the CSV row with the plan, manual items and CSV path after a run. Both movers also take `-PassThru`: one result object (plan, before and after, review items, CSV path, and for hybrid the OU and sync result) instead of the table, also under `-WhatIf`. The leavers use the manager to hand over the mailbox.
 
 ## Hybrid lifecycle
 | Script | Does | Graph scopes |
@@ -199,10 +199,10 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence). Returned files saved by Excel untested |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`; `-PassThru` preview, nothing-to-change and move through the IAM console) |
-| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). Group-assigned licences, phone and Authenticator removal (default-method retry) and `-ConvertMailbox` tested offline only |
+| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). Group-assigned licences, phone and Authenticator removal (default-method retry) and `-ConvertMailbox` tested offline only. `-PassThru` untested live |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. Verified-domain check tested in lab. CSV and `-ResumeUserPrincipalName` untested live |
 | Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ), `-PassThru` preview and move with OU change and sync result through the IAM console |
-| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab) |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab). `-PassThru` untested live |
 
 Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
 

@@ -4,6 +4,11 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-26
+
+### Added
+- Both leavers: `-PassThru` returns one result object, so a GUI or another script can show it. Under `-WhatIf`: `Upn`, `Applied` (`$false`), `Plan` (the steps) and `Manual` (follow-up items), plus `AlreadyDisabled` (cloud) or `FromOU` and `ToOU` (hybrid). After a run: the CSV row plus `Applied`, `Plan`, `Manual` and `Csv`. A caller with no console passes `-Confirm:$false`.
+
 ## [1.5.2] - 2026-11-26
 
 ### Added

@@ -60,6 +60,11 @@
 
 .PARAMETER HideFromGal
     Hide the shared mailbox from the address list.
+.PARAMETER PassThru
+    Return one result object, for a caller such as a GUI. Under -WhatIf: Upn, Applied
+    ($false), Plan (the steps), Manual (follow-up items) and AlreadyDisabled. After a run: the CSV row
+    plus Applied, Plan, Manual and Csv. Pass -Confirm:$false from a caller with no
+    console to answer the confirmation.
 
 .EXAMPLE
     .\Cloud\Disable-CloudLeaver.ps1 -UserPrincipalName stefan.ionescu@contoso.onmicrosoft.com -WhatIf
@@ -77,7 +82,8 @@ param(
     [string]$DelegateTo,
     [switch]$NoDelegate,
     [string]$AutoReplyMessage,
-    [switch]$HideFromGal
+    [switch]$HideFromGal,
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -151,7 +157,12 @@ Write-IamLog -Message "Leaver plan for ${UserPrincipalName}: $($plan -join '; ')
 foreach ($item in $manual) { Write-IamLog -Level WARN -Message "Manual follow-up for ${UserPrincipalName}: $item" }
 if (-not $user.AccountEnabled) { Write-IamLog -Level WARN -Message "$UserPrincipalName is already disabled. Running the remaining steps." }
 
-if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) { return }
+if (-not $PSCmdlet.ShouldProcess($UserPrincipalName, ($plan -join '; '))) {
+    if ($PassThru) {
+        [pscustomobject]@{ Upn = $UserPrincipalName; Applied = $false; Plan = @($plan); Manual = @($manual); AlreadyDisabled = (-not $user.AccountEnabled) }
+    }
+    return
+}
 
 # ---- Execute ----
 $uri = "v1.0/users/$($user.Id)"
@@ -227,7 +238,7 @@ if ($user.Department) {
 }
 
 $csv = Get-IamOutputPath -Prefix 'Leaver'
-[pscustomobject]@{
+$row = [pscustomobject]@{
     Upn            = $UserPrincipalName
     Disabled       = $true
     SessionsRevoke = $true
@@ -237,7 +248,8 @@ $csv = Get-IamOutputPath -Prefix 'Leaver'
     Mailbox        = $mailboxOutcome
     OldDepartment  = $user.Department
     ManualFollowUp = ($manual -join '; ')
-} | Export-Csv -Path $csv
+}
+$row | Export-Csv -Path $csv
 
 if ($manual.Count) {
     Write-IamLog -Level WARN -Message "Leaver done with $($manual.Count) manual item(s) for ${UserPrincipalName}. CSV: $csv"
@@ -245,4 +257,8 @@ if ($manual.Count) {
 }
 else {
     Write-IamLog -Message "Leaver done for ${UserPrincipalName}, no manual items. CSV: $csv"
+}
+
+if ($PassThru) {
+    $row | Add-Member -NotePropertyMembers ([ordered]@{ Applied = $true; Plan = @($plan); Manual = @($manual); Csv = $csv }) -PassThru
 }
