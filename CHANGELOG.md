@@ -9,6 +9,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 ### Added
 - Both movers: `-PassThru` returns one result object instead of the review table, so a GUI or another script can show it: `Upn`, `Applied`, `Plan`, department, title and manager before and after, `Review` (the items that do not follow the move) and `ReviewCsv`. The hybrid mover adds `FromOU`, `ToOU` and `Cloud` (`Synced`, `Deleted`, `Not checked`, `Not run`). Returned under `-WhatIf` too, with `Applied` set to `$false`, since the review is read-only. A user with nothing to change returns `Plan = 'Nothing to change'`.
 
+### Tested in the lab
+- Both movers' `-PassThru`: preview, nothing to change and a real move (cloud), preview and a move with OU change and sync result (hybrid).
+
 ### Changed
 - `Move-HybridUser.ps1`: when the user does not show up in Entra ID within 60 seconds after the sync, it now warns instead of reporting "synced".
 

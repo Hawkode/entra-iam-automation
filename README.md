@@ -198,10 +198,10 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence). Returned files saved by Excel untested |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
-| Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`). `-PassThru` untested live |
+| Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`; `-PassThru` preview, nothing-to-change and move through the IAM console) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). Group-assigned licences, phone and Authenticator removal (default-method retry) and `-ConvertMailbox` tested offline only |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. Verified-domain check tested in lab. CSV and `-ResumeUserPrincipalName` untested live |
-| Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ). `-PassThru` untested live |
+| Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ), `-PassThru` preview and move with OU change and sync result through the IAM console |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab) |
 
 Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
