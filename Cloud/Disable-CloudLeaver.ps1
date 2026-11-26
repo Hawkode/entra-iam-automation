@@ -5,14 +5,16 @@
 .DESCRIPTION
     Order matters, and the script follows it:
       1. Disable the account (blocks new sign-ins).
-      2. Revoke sign-in sessions (kills refresh tokens). Disable first, otherwise a
-         stolen password could start a new session between the two steps.
-      3. Optional: remove MFA / authentication methods (-RemoveAuthMethods).
-      4. Optional: convert the mailbox to shared (-ConvertMailbox), BEFORE the licence goes.
-      5. Remove assigned group memberships.
-      6. Remove direct licences (group-assigned licences drop with the group). Skipped
+      2. Reset the password to a random value nobody sees, so re-enabling the account by
+         mistake does not bring the old password back.
+      3. Revoke sign-in sessions (kills refresh tokens). Disable first, otherwise a
+         stolen password could start a new session between the steps.
+      4. Optional: remove MFA / authentication methods (-RemoveAuthMethods).
+      5. Optional: convert the mailbox to shared (-ConvertMailbox), BEFORE the licence goes.
+      6. Remove assigned group memberships.
+      7. Remove direct licences (group-assigned licences drop with the group). Skipped
          automatically when the shared mailbox still needs a licence.
-      7. Clear the department, so the Dept- dynamic groups drop the user.
+      8. Clear the department, so the Dept- dynamic groups drop the user.
 
     Everything is listed before anything changes, then confirmed once.
     Refuses to run on break-glass accounts from config or on your own account.
@@ -33,7 +35,8 @@
     Access to a leaver's mailbox usually needs HR approval: agree this default as policy,
     or name the person with -DelegateTo, or use -NoDelegate.
 
-    Graph scopes (delegated): User.ReadWrite.All, GroupMember.ReadWrite.All, RoleManagement.Read.Directory
+    Graph scopes (delegated): User.ReadWrite.All, User-PasswordProfile.ReadWrite.All (password reset),
+      GroupMember.ReadWrite.All, RoleManagement.Read.Directory
       plus UserAuthenticationMethod.ReadWrite.All with -RemoveAuthMethods (Critical: requested only then)
     Roles: User Administrator (cannot disable admins, by design); Authentication Administrator
       for -RemoveAuthMethods; Exchange Recipient Management for -ConvertMailbox.
@@ -99,7 +102,7 @@ if (@($cfg.BreakGlassUpns) -contains $UserPrincipalName) {
     throw "$UserPrincipalName is a break-glass account. The leaver script will not touch it."
 }
 
-$scopes = @('User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
+$scopes = @('User.ReadWrite.All', 'User-PasswordProfile.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
 if ($RemoveAuthMethods) { $scopes += 'UserAuthenticationMethod.ReadWrite.All' }
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes $scopes
 
@@ -140,7 +143,7 @@ $mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $UserPrincipalName -ConvertMa
 $manual += $mbx.Manual
 $keepLicence = $KeepLicense -or $mbx.ForceKeepLicence
 
-$plan = @('disable account', 'revoke sessions')
+$plan = @('disable account', 'reset password', 'revoke sessions')
 if ($RemoveAuthMethods) {
     if ($authMethods.Count) { $plan += "remove $($authMethods.Count) authentication method(s): $($authMethods.Type -join ', ')" }
     else { $plan += 'no authentication methods to remove' }
@@ -171,10 +174,24 @@ $uri = "v1.0/users/$($user.Id)"
 Invoke-MgGraphRequest -Method PATCH -Uri $uri -Body '{"accountEnabled": false}' -ContentType 'application/json' | Out-Null
 Write-IamLog -Message "Disabled: $UserPrincipalName"
 
-# 2. Revoke sessions. Also stop on failure.
+# 2. Reset the password to a random value nobody sees. The account is already disabled, so on a
+# failure carry on and report it rather than leave the sessions alive.
+try {
+    $pw = @{ passwordProfile = @{ password = (Get-IamRandomPassword -Length 32); forceChangePasswordNextSignIn = $true } } | ConvertTo-Json
+    Invoke-MgGraphRequest -Method PATCH -Uri $uri -Body $pw -ContentType 'application/json' | Out-Null
+    $pw = $null
+    Write-IamLog -Message "Password reset to a random value: $UserPrincipalName"
+}
+catch {
+    $pw = $null
+    $manual += 'Password not reset: reset it by hand (an admin account needs a Privileged Authentication Administrator)'
+    Write-IamLog -Level ERROR -Message "Password reset failed for ${UserPrincipalName}: $($_.Exception.Message)"
+}
+
+# 3. Revoke sessions. Stop on failure.
 Revoke-IamUserSession -UserId $user.Id -Confirm:$false
 
-# 3. Authentication methods (optional). Carry on past a failure and report it.
+# 4. Authentication methods (optional). Carry on past a failure and report it.
 $authRemoved = @()
 if ($RemoveAuthMethods -and $authMethods.Count) {
     try {
@@ -188,7 +205,7 @@ if ($RemoveAuthMethods -and $authMethods.Count) {
     }
 }
 
-# 4. Mailbox (optional), before the licence goes. If it fails, keep the licence.
+# 5. Mailbox (optional), before the licence goes. If it fails, keep the licence.
 $mailboxOutcome = ''
 if ($mbx.Convert) {
     try {
@@ -204,7 +221,7 @@ if ($mbx.Convert) {
     }
 }
 
-# 5. Assigned groups. Carry on past a failure and report it.
+# 6. Assigned groups. Carry on past a failure and report it.
 foreach ($g in $removeGroups) {
     try {
         Invoke-MgGraphRequest -Method DELETE -Uri "v1.0/groups/$($g.Id)/members/$($user.Id)/`$ref" | Out-Null
@@ -216,7 +233,7 @@ foreach ($g in $removeGroups) {
     }
 }
 
-# 6. Licences.
+# 7. Licences.
 if (-not $keepLicence) {
     try { Remove-IamUserLicense -UserId $user.Id -Confirm:$false }
     catch {
@@ -225,7 +242,7 @@ if (-not $keepLicence) {
     }
 }
 
-# 7. Department, last: the dynamic groups drop the user within minutes.
+# 8. Department, last: the dynamic groups drop the user within minutes.
 if ($user.Department) {
     try {
         Invoke-MgGraphRequest -Method PATCH -Uri $uri -Body '{"department": null}' -ContentType 'application/json' | Out-Null
