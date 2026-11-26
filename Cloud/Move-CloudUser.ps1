@@ -22,6 +22,11 @@
     Graph scopes (delegated): User.ReadWrite.All, GroupMember.Read.All, RoleManagement.Read.Directory
     Entra role for the signed-in admin: User Administrator
 
+.PARAMETER PassThru
+    Return one result object instead of the review table, for a caller such as a GUI:
+    Upn, Applied, Plan, From/To department, title and manager, Review (the items that do
+    not follow the move) and ReviewCsv. Also returned under -WhatIf (Applied is
+    $false), since the review is read-only.
 .EXAMPLE
     .\Cloud\Move-CloudUser.ps1 -UserPrincipalName sofia.novak@contoso.onmicrosoft.com -Department HR -WhatIf
 .EXAMPLE
@@ -32,7 +37,8 @@ param(
     [Parameter(Mandatory)][string]$UserPrincipalName,
     [Parameter(Mandatory)][string]$Department,
     [string]$JobTitle,
-    [string]$Manager
+    [string]$Manager,
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +72,13 @@ $deptChange = $oldDept -cne $newDept
 $titleChange = $newTitle -and $newTitle -cne $user.JobTitle
 if (-not $deptChange -and -not $titleChange -and -not $managerChange) {
     Write-IamLog -Message "$UserPrincipalName is already in $newDept with that title and manager. Nothing to change."
+    if ($PassThru) {
+        [pscustomobject]@{
+            Upn = $user.UserPrincipalName; Applied = $false; Plan = 'Nothing to change'
+            FromDepartment = $oldDept; ToDepartment = $newDept; FromTitle = $user.JobTitle; ToTitle = $user.JobTitle
+            FromManager = $oldManagerUpn; ToManager = $oldManagerUpn; Review = @(); ReviewCsv = $null
+        }
+    }
     return
 }
 
@@ -92,13 +105,17 @@ if ($titleChange) { $body.JobTitle = $newTitle; $parts += "job title '$($user.Jo
 if ($managerChange) { $parts += "manager $oldManagerUpn -> $($newManager.UserPrincipalName)" }
 $what = $parts -join ', '
 
+$applied = $false
 if ($PSCmdlet.ShouldProcess($UserPrincipalName, $what)) {
     if ($body.Count -gt 0) { Update-MgUser -UserId $user.Id -BodyParameter $body }
     if ($managerChange) { Set-IamCloudManager -UserId $user.Id -ManagerId $newManager.Id -Confirm:$false }
     $msg = "Moved $UserPrincipalName. $what."
     if ($deptChange) { $msg += ' Dynamic groups update within minutes.' }
     Write-IamLog -Message $msg
+    $applied = $true
 }
+
+$csv = $null
 
 if ($review.Count -gt 0) {
     $summary = ($review | ForEach-Object { "$($_.Type): $($_.Name)" }) -join '; '
@@ -109,8 +126,18 @@ if ($review.Count -gt 0) {
     @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -WhatIf:$false
     Write-IamLog -Message "Review list: $csv"
 
-    $review | Format-Table Type, Name -AutoSize
+    if (-not $PassThru) { $review | Format-Table Type, Name -AutoSize }
 }
 else {
     Write-IamLog -Message "No assigned groups or active roles on $UserPrincipalName. All group access follows the department."
+}
+
+if ($PassThru) {
+    [pscustomobject]@{
+        Upn = $user.UserPrincipalName; Applied = $applied; Plan = $what
+        FromDepartment = $oldDept; ToDepartment = $newDept
+        FromTitle = $user.JobTitle; ToTitle = $(if ($titleChange) { $newTitle } else { $user.JobTitle })
+        FromManager = $oldManagerUpn; ToManager = $(if ($managerChange) { $newManager.UserPrincipalName } else { $oldManagerUpn })
+        Review = @($review); ReviewCsv = $csv
+    }
 }

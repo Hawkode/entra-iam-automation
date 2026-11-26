@@ -30,6 +30,13 @@
     AD rights: write department, title and manager, move users between the DepartmentOUs.
     Entra Connect server: WinRM and ADSyncOperators.
 
+.PARAMETER PassThru
+    Return one result object instead of the review table, for a caller such as a GUI:
+    Upn, Applied, Plan, From/To department, title and manager, Review (the items that do
+    not follow the move) and ReviewCsv. Hybrid adds FromOU, ToOU and Cloud
+    (Synced, Deleted when the new OU is outside the sync scope, Not checked when the
+    user did not show up within 60 seconds, Not run under -WhatIf). Also returned under -WhatIf (Applied is
+    $false), since the review is read-only.
 .EXAMPLE
     .\Hybrid\Move-HybridUser.ps1 -UserPrincipalName sofia.novak@contoso.com -Department HR -WhatIf
 .EXAMPLE
@@ -41,6 +48,7 @@ param(
     [Parameter(Mandatory)][string]$Department,
     [string]$JobTitle,
     [string]$Manager,
+    [switch]$PassThru,
     [int]$SyncTimeoutSeconds = 600
 )
 
@@ -83,6 +91,14 @@ $deptChange = $oldDept -cne $newDept
 $titleChange = $newTitle -and $newTitle -cne $ad.Title
 if (-not $deptChange -and -not $moveOU -and -not $titleChange -and -not $managerChange) {
     Write-IamLog -Message "$UserPrincipalName is already in $newDept ($newOU) with that title and manager. Nothing to change."
+    if ($PassThru) {
+        [pscustomobject]@{
+            Upn = $UserPrincipalName; Applied = $false; Plan = 'Nothing to change'
+            FromDepartment = $oldDept; ToDepartment = $newDept; FromTitle = $ad.Title; ToTitle = $ad.Title
+            FromManager = $oldManagerUpn; ToManager = $oldManagerUpn; FromOU = $oldOU; ToOU = $newOU
+            Cloud = 'Not run'; Review = @(); ReviewCsv = $null
+        }
+    }
     return
 }
 
@@ -114,6 +130,8 @@ if ($managerChange) { $parts += "manager $oldManagerUpn -> $($newManager.UserPri
 if ($moveOU) { $parts += "move to $newOU" }
 $what = ($parts -join ', ') + ', delta sync'
 
+$applied = $false
+$cloudState = 'Not run'
 if ($PSCmdlet.ShouldProcess($UserPrincipalName, $what)) {
     $set = @{ Identity = $ad.ObjectGUID }
     if ($deptChange) { $set.Department = $newDept }
@@ -122,17 +140,26 @@ if ($PSCmdlet.ShouldProcess($UserPrincipalName, $what)) {
     if ($set.Count -gt 1) { Set-ADUser @set }
     if ($moveOU) { Move-ADObject -Identity $ad.ObjectGUID -TargetPath $newOU }
     Write-IamLog -Message "Moved $UserPrincipalName in AD. $what"
+    $applied = $true
 
     $null = Invoke-IamDeltaSync -Server $cfg.EntraConnectServer -TimeoutSeconds $SyncTimeoutSeconds
     $after = Wait-IamCloudUser -UserId $cloud.Id -TimeoutSeconds 60
     if ($after -eq 'Deleted') {
+        $cloudState = 'Deleted'
         Write-IamLog -Level ERROR -Message ("$UserPrincipalName no longer exists in Entra ID: $newOU is outside the sync scope. " +
             'Move the account back to a synced OU and run a delta sync, or restore it from Deleted users.')
     }
-    else {
+    elseif ($after) {
+        $cloudState = 'Synced'
         Write-IamLog -Message "$UserPrincipalName synced. Dynamic groups update within minutes."
     }
+    else {
+        $cloudState = 'Not checked'
+        Write-IamLog -Level WARN -Message "$UserPrincipalName did not answer in Entra ID within 60 seconds after the sync. Check the account before relying on the move."
+    }
 }
+
+$csv = $null
 
 if ($review.Count -gt 0) {
     $summary = ($review | ForEach-Object { "$($_.Type): $($_.Name)" }) -join '; '
@@ -141,8 +168,19 @@ if ($review.Count -gt 0) {
     $review | Select-Object @{ n = 'Upn'; e = { $UserPrincipalName } }, @{ n = 'From'; e = { $oldDept } },
     @{ n = 'To'; e = { $newDept } }, Type, Name, Id | Export-Csv -Path $csv -WhatIf:$false
     Write-IamLog -Message "Review list: $csv"
-    $review | Format-Table Type, Name -AutoSize
+    if (-not $PassThru) { $review | Format-Table Type, Name -AutoSize }
 }
 else {
     Write-IamLog -Message "No AD groups, cloud assigned groups or active roles on $UserPrincipalName."
+}
+
+if ($PassThru) {
+    [pscustomobject]@{
+        Upn = $UserPrincipalName; Applied = $applied; Plan = $what
+        FromDepartment = $oldDept; ToDepartment = $newDept
+        FromTitle = $ad.Title; ToTitle = $(if ($titleChange) { $newTitle } else { $ad.Title })
+        FromManager = $oldManagerUpn; ToManager = $(if ($managerChange) { $newManager.UserPrincipalName } else { $oldManagerUpn })
+        FromOU = $oldOU; ToOU = $newOU; Cloud = $cloudState
+        Review = @($review); ReviewCsv = $csv
+    }
 }
