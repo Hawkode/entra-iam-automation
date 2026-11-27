@@ -4,6 +4,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+### Tested in the lab
+- `New-HybridJoiner.ps1`: CSV with two users in different department OUs (one delta sync, both licensed), and `-ResumeUserPrincipalName` after a forced timeout (`-SyncTimeoutSeconds 5`): no AD change, licence set, no password shown twice.
+
 ## [1.5.3] - 2026-11-26
 
 ### Added

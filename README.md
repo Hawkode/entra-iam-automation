@@ -200,7 +200,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`; `-PassThru` preview, nothing-to-change and move through the IAM console) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). Group-assigned licences, phone and Authenticator removal (default-method retry) and `-ConvertMailbox` tested offline only. `-PassThru`, password reset and `-RemoveAuthMethods` (TAP) tested through the IAM console |
-| Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, soft-match guard. Verified-domain check tested in lab. CSV and `-ResumeUserPrincipalName` untested live |
+| Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, CSV (two departments, one sync), `-ResumeUserPrincipalName` after a forced sync timeout, soft-match guard. Verified-domain check tested in lab |
 | Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ), `-PassThru` preview and move with OU change and sync result through the IAM console |
 | Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab). `-PassThru` and `-RemoveAuthMethods` (none registered) tested through the IAM console |
 
