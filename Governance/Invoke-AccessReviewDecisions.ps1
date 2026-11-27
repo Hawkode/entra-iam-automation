@@ -172,11 +172,11 @@ function Get-ReviewSummary {
         Rows        = $all
         Reviewed    = $allDone
         Complete    = '{0:P0}' -f ($allDone / [math]::Max($all, 1))
-        Keep        = ($lines | Measure-Object -Property Keep -Sum).Sum
-        Revoke      = ($lines | Measure-Object -Property Revoke -Sum).Sum
-        Removed     = ($lines | Measure-Object -Property Removed -Sum).Sum
-        Manual      = ($lines | Measure-Object -Property Manual -Sum).Sum
-        Failed      = ($lines | Measure-Object -Property Failed -Sum).Sum
+        Keep        = [int]($lines | Measure-Object -Property Keep -Sum).Sum
+        Revoke      = [int]($lines | Measure-Object -Property Revoke -Sum).Sum
+        Removed     = [int]($lines | Measure-Object -Property Removed -Sum).Sum
+        Manual      = [int]($lines | Measure-Object -Property Manual -Sum).Sum
+        Failed      = [int]($lines | Measure-Object -Property Failed -Sum).Sum
         NotReviewed = $all - $allDone
     }
 }

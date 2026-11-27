@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.5.3` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.5.4` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.5.3 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.5.4 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -196,7 +196,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
 | Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
-| Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence). Returned files saved by Excel untested |
+| Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence, a returned file in Excel's CSV format: no quotes, TRUE/FALSE, ANSI without BOM, CRLF). A file saved by Excel itself untested (no Excel licence in the lab) |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`; `-PassThru` preview, nothing-to-change and move through the IAM console) |
 | Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). `-PassThru`, password reset and `-RemoveAuthMethods` (TAP; Microsoft Authenticator as the default method, with a TAP) tested through the IAM console. Group-assigned licences, phone removal, the default-method retry (the default was listed last, so it may not have run) and `-ConvertMailbox` tested offline only |

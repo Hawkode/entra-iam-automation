@@ -4,7 +4,13 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.5.4] - 2026-11-27
+
+### Fixed
+- `Invoke-AccessReviewDecisions.ps1`: the TOTAL row of the summary showed counts as decimals (`2.00`). They are whole numbers now, like the reviewer rows.
+
 ### Tested in the lab
+- `Invoke-AccessReviewDecisions.ps1` with a returned file in the format Excel's "CSV (Comma delimited)" writes: no quotes, `TRUE`/`FALSE`, ANSI without BOM, CRLF. Read without problems, 2 removed, 1 kept, evidence written. A file saved by Excel itself is still untested.
 - `New-HybridJoiner.ps1`: CSV with two users in different department OUs (one delta sync, both licensed), and `-ResumeUserPrincipalName` after a forced timeout (`-SyncTimeoutSeconds 5`): no AD change, licence set, no password shown twice.
 - `Disable-CloudLeaver.ps1 -RemoveAuthMethods`: Microsoft Authenticator (push, the default sign-in method) and a Temporary Access Pass both removed, only the password method left. Graph listed the default last, so the second-pass retry may not have run; it stays tested offline only.
 
