@@ -984,3 +984,73 @@ Describe 'Get-IamBreakGlassCandidate' {
         Get-IamBreakGlassCandidate -Admin $script:admins -Policy @() | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Get-IamLicenceFinding' {
+    BeforeAll {
+        $script:now = [datetime]'2026-11-27T12:00:00Z'
+        $script:cutoff = $script:now.AddDays(-90)
+        $script:skuNames = @{ 'sku-e3' = 'SPE_E3'; 'sku-p2' = 'AAD_PREMIUM_P2' }
+        function New-TestUser {
+            param([bool]$Enabled = $true, [string[]]$Sku = @('sku-e3'), [bool[]]$ByGroup = @($false), $LastSignIn, $Created = '2025-01-01T00:00:00Z', [string]$Upn = 'jdoe@contoso.com')
+            $i = 0
+            [pscustomobject]@{
+                DisplayName             = 'J Doe'
+                UserPrincipalName       = $Upn
+                AccountEnabled          = $Enabled
+                CreatedDateTime         = $Created
+                OnPremisesSyncEnabled   = $null
+                AssignedLicenses        = @($Sku | ForEach-Object { [pscustomobject]@{ SkuId = $_ } })
+                LicenseAssignmentStates = @($Sku | ForEach-Object { [pscustomobject]@{ SkuId = $_; AssignedByGroup = $(if ($ByGroup[$i++]) { 'group-1' } else { $null }) } })
+                SignInActivity          = [pscustomobject]@{ LastSignInDateTime = $LastSignIn; LastNonInteractiveSignInDateTime = $null; LastSuccessfulSignInDateTime = $null }
+            }
+        }
+    }
+
+    It 'flags a disabled account with a direct licence' {
+        $r = Get-IamLicenceFinding -User (New-TestUser -Enabled $false -LastSignIn '2026-11-20T00:00:00Z') -SkuName $script:skuNames -Cutoff $script:cutoff -Now $script:now
+        $r.Finding | Should -Be 'Disabled'
+        $r.AssignedBy | Should -Be 'Direct'
+        $r.Licences | Should -Be 'SPE_E3'
+        $r.Action | Should -BeLike 'Remove the licence, unless a shared mailbox*'
+    }
+
+    It 'points a disabled account with a group licence at the group' {
+        $r = Get-IamLicenceFinding -User (New-TestUser -Enabled $false -ByGroup $true) -SkuName $script:skuNames -Cutoff $script:cutoff -Now $script:now
+        $r.AssignedBy | Should -Be 'Group'
+        $r.Action | Should -Be 'Remove from the licensing group'
+    }
+
+    It 'reports mixed assignment and sorts the licence names' {
+        $u = New-TestUser -Sku 'sku-p2', 'sku-e3' -ByGroup $true, $false -LastSignIn '2026-11-26T00:00:00Z'
+        $r = Get-IamLicenceFinding -User $u -SkuName $script:skuNames -Cutoff $script:cutoff -Now $script:now
+        $r.AssignedBy | Should -Be 'Direct and group'
+        $r.Licences | Should -Be 'AAD_PREMIUM_P2; SPE_E3'
+        $r.Finding | Should -Be ''
+    }
+
+    It 'flags an enabled account with no sign-in since the threshold' {
+        $r = Get-IamLicenceFinding -User (New-TestUser -LastSignIn '2026-07-01T00:00:00Z') -SkuName $script:skuNames -Cutoff $script:cutoff -Now $script:now
+        $r.Finding | Should -Be 'Inactive'
+        $r.DaysInactive | Should -Be 149
+    }
+
+    It 'flags an old account that never signed in, but not a new one' {
+        (Get-IamLicenceFinding -User (New-TestUser) -Cutoff $script:cutoff -Now $script:now).Finding | Should -Be 'Never signed in'
+        (Get-IamLicenceFinding -User (New-TestUser -Created '2026-11-20T00:00:00Z') -Cutoff $script:cutoff -Now $script:now).Finding | Should -Be ''
+    }
+
+    It 'flags only disabled accounts without sign-in data' {
+        (Get-IamLicenceFinding -User (New-TestUser) -Cutoff $script:cutoff -Now $script:now -NoSignInData).Finding | Should -Be ''
+        (Get-IamLicenceFinding -User (New-TestUser -Enabled $false) -Cutoff $script:cutoff -Now $script:now -NoSignInData).Finding | Should -Be 'Disabled'
+    }
+
+    It 'marks break-glass accounts as expected' {
+        $r = Get-IamLicenceFinding -User (New-TestUser -Upn 'bg@contoso.com' -Enabled $false) -Cutoff $script:cutoff -Now $script:now -BreakGlass 'bg@contoso.com'
+        $r.Finding | Should -Be 'Expected (break-glass)'
+    }
+
+    It 'shows the SKU ID when the name is unknown' {
+        $r = Get-IamLicenceFinding -User (New-TestUser -Sku 'sku-unknown' -LastSignIn '2026-11-26T00:00:00Z') -SkuName $script:skuNames -Cutoff $script:cutoff -Now $script:now
+        $r.Licences | Should -Be 'sku-unknown'
+    }
+}

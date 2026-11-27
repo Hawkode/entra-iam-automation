@@ -1184,6 +1184,73 @@ function Get-IamBreakGlassCandidate {
     }
 }
 
+function Get-IamLicenceFinding {
+    <#
+    .SYNOPSIS
+        One report row for a licensed user: which licences, how assigned, last sign-in, and
+        whether the licence looks unused (Disabled, Never signed in, Inactive).
+    .DESCRIPTION
+        Pass a user from Get-MgUser with AssignedLicenses, LicenseAssignmentStates and, when the
+        tenant has P1, SignInActivity. Without sign-in data (-NoSignInData) only disabled
+        accounts are flagged. Break-glass accounts are marked as expected.
+        Last sign-in is the latest of the interactive, non-interactive and successful sign-in.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$User,
+        [hashtable]$SkuName = @{},
+        [Parameter(Mandatory)][datetime]$Cutoff,
+        [Parameter(Mandatory)][datetime]$Now,
+        [string[]]$BreakGlass = @(),
+        [switch]$NoSignInData
+    )
+    $skus = @($User.AssignedLicenses | ForEach-Object { "$($_.SkuId)" } | Where-Object { $_ })
+    $names = @($skus | ForEach-Object { if ($SkuName.ContainsKey($_)) { $SkuName[$_] } else { $_ } } | Sort-Object)
+
+    $states = @($User.LicenseAssignmentStates | Where-Object { $_ })
+    $byGroup = @($states | Where-Object { $_.AssignedByGroup }).Count
+    $assignedBy = if (-not $states.Count) { 'Unknown' }
+    elseif ($byGroup -eq $states.Count) { 'Group' }
+    elseif ($byGroup -eq 0) { 'Direct' }
+    else { 'Direct and group' }
+
+    $last = $null
+    if (-not $NoSignInData) {
+        $s = $User.SignInActivity
+        $last = @($s.LastSignInDateTime, $s.LastNonInteractiveSignInDateTime, $s.LastSuccessfulSignInDateTime) |
+            Where-Object { $_ } | ForEach-Object { [datetime]$_ } | Sort-Object -Descending | Select-Object -First 1
+    }
+
+    $finding = ''
+    if ($BreakGlass -contains $User.UserPrincipalName) { $finding = 'Expected (break-glass)' }
+    elseif (-not $User.AccountEnabled) { $finding = 'Disabled' }
+    elseif ($NoSignInData) { $finding = '' }
+    elseif (-not $last -and $User.CreatedDateTime -and [datetime]$User.CreatedDateTime -lt $Cutoff) { $finding = 'Never signed in' }
+    elseif ($last -and $last -lt $Cutoff) { $finding = 'Inactive' }
+
+    $action = switch ($finding) {
+        'Disabled' {
+            if ($assignedBy -eq 'Group') { 'Remove from the licensing group' }
+            else { 'Remove the licence, unless a shared mailbox still needs it (over 50 GB, hold, archive)' }
+        }
+        { $_ -in 'Never signed in', 'Inactive' } { 'Check with the manager: offboard, or remove the licence' }
+        default { '' }
+    }
+
+    [pscustomobject]@{
+        DisplayName  = $User.DisplayName
+        Upn          = $User.UserPrincipalName
+        Source       = if ($User.OnPremisesSyncEnabled) { 'AD' } else { 'Cloud' }
+        Enabled      = [bool]$User.AccountEnabled
+        LastSignIn   = $last
+        DaysInactive = if ($last) { [int][math]::Floor(($Now - $last).TotalDays) } else { $null }
+        Licences     = ($names -join '; ')
+        AssignedBy   = $assignedBy
+        Finding      = $finding
+        Action       = $action
+    }
+}
+
 Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
@@ -1193,4 +1260,4 @@ Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfi
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
     Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap,
     ConvertTo-IamConfigText, Test-IamOuInSyncScope, ConvertFrom-IamMsolDescription, Get-IamUpnFormatGuess,
-    Get-IamBreakGlassCandidate
+    Get-IamBreakGlassCandidate, Get-IamLicenceFinding

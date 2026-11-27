@@ -22,7 +22,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - Microsoft Graph PowerShell SDK: only the submodules the scripts use, all at one version. `Setup\Install-IamAutomation.ps1` installs them (step 2 below).
 - For the leavers' `-ConvertMailbox` only: ExchangeOnlineManagement (`Install-IamAutomation.ps1 -IncludeExchange`).
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
-- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. PIM data in `Get-StandingAdmins` needs P2.
+- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. `Get-UnusedLicences` runs on Free but flags only disabled accounts without P1. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
@@ -86,7 +86,7 @@ Assigning a group needs Entra ID P1. Without it, name the operators with `-Opera
 | `UpnFormat` | Joiner | UPN prefix pattern. Tokens `{given}`, `{surname}`, `{g}`, `{s}`. Default `{given}.{surname}` |
 | `UsageLocation` | Joiner | Two-letter country code, e.g. `GB` |
 | `LicenseSkuPartNumber` | Joiner | SKU to assign (`Get-MgSubscribedSku`). Not needed with `-SkipLicense` |
-| `StaleDays` | Stale accounts | Days without sign-in before an account is flagged |
+| `StaleDays` | Stale accounts, unused licences | Days without sign-in before an account is flagged |
 | `BreakGlassUpns` | Leaver, reports | Emergency access accounts. The leaver refuses to touch them. `Get-MfaRegistration` flags them without phishing-resistant MFA, the other reports mark them as expected |
 | `AllowedDepartments` | Joiner, mover | Exact department names your dynamic groups key on |
 | `DepartmentOUs` | Hybrid joiner, mover | Department name to OU. The keys are the allowed departments in hybrid scripts |
@@ -163,6 +163,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 | `Get-StaleAccounts.ps1` | Enabled accounts with no recent sign-in, or none ever | `User.Read.All`, `AuditLog.Read.All` | P1 or P2 |
 | `Get-MfaRegistration.ps1` | Users with no MFA, only weak methods (SMS, voice, email), admins and break-glass accounts without a phishing-resistant method | `AuditLog.Read.All` (role: Reports Reader) | P1 or P2 |
 | `Get-ManagerCoverage.ps1` | Enabled users with no manager or a disabled manager. The leavers' mailbox handover depends on it | `User.Read.All` | Free |
+| `Get-UnusedLicences.ps1` | Licences on disabled accounts and on enabled accounts with no sign-in for `-InactiveDays` (default `StaleDays`), direct or group-assigned, with a summary per licence: unused and free | `User.Read.All`, `AuditLog.Read.All`, `LicenseAssignment.Read.All` | Free for disabled accounts, P1 for inactive |
 
 ## Access reviews
 A quarterly recertification without Entra ID P2: each group owner gets a CSV of who is in their groups, marks each row Keep or Revoke, and sends it back. The second script checks the returned files and applies the decisions.
@@ -241,6 +242,7 @@ $cert.Thumbprint
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` tested in hybrid lab, including a user whose AD and cloud UPNs differ |
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
+| Reports/Get-UnusedLicences.ps1 | Built, unit tests only, lab test next |
 | Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence, a returned file in Excel's CSV format: no quotes, TRUE/FALSE, ANSI without BOM, CRLF). A file saved by Excel itself untested (no Excel licence in the lab) |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |

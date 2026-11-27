@@ -40,6 +40,7 @@ cd C:\Tools\entra-iam-automation
 .\Reports\Get-StandingAdmins.ps1 -PrivilegedOnly
 .\Reports\Get-RiskyAppPermissions.ps1
 .\Reports\Get-ManagerCoverage.ps1
+.\Reports\Get-UnusedLicences.ps1 -InactiveDays 60
 ```
 
 ## Access review (quarterly)
