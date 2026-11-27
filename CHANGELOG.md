@@ -6,6 +6,7 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ### Tested in the lab
 - `New-HybridJoiner.ps1`: CSV with two users in different department OUs (one delta sync, both licensed), and `-ResumeUserPrincipalName` after a forced timeout (`-SyncTimeoutSeconds 5`): no AD change, licence set, no password shown twice.
+- `Disable-CloudLeaver.ps1 -RemoveAuthMethods`: Microsoft Authenticator (push, the default sign-in method) and a Temporary Access Pass both removed, only the password method left. Graph listed the default last, so the second-pass retry may not have run; it stays tested offline only.
 
 ## [1.5.3] - 2026-11-26
 
