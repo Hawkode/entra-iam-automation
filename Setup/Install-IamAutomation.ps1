@@ -11,7 +11,9 @@
     Changes, in order:
       1. Installs the Microsoft Graph submodules the scripts use, all at one version (the newest
          on the PowerShell Gallery, or -GraphVersion). Not the whole Microsoft.Graph roll-up, and
-         never mixed versions, which break sign-in. Modules already at that version are skipped.
+         never mixed versions, which break sign-in. Modules already at that version in PowerShell 7's
+         own folders are skipped: modules installed for Windows PowerShell 5.1 do not count, because
+         a pwsh started on its own (the console shortcut) cannot see them.
       2. With -IncludeExchange: ExchangeOnlineManagement, for -ConvertMailbox.
       3. Unblocks the files (downloaded zips are marked as coming from the internet).
       4. Registers the IamAutomation event log source, when run elevated.
@@ -71,15 +73,34 @@ $graphModules = @(
     'Microsoft.Graph.Identity.SignIns', 'Microsoft.Graph.Applications', 'Microsoft.Graph.DirectoryObjects'
 )
 
+# Only PowerShell 7's own module folders count. A pwsh started from Windows PowerShell inherits its
+# module path, so it also sees modules installed for 5.1 (Documents\WindowsPowerShell\Modules),
+# which a pwsh started on its own (the console shortcut, a scheduled task) does not.
+$ps7Paths = @(
+    (Join-Path -Path ([Environment]::GetFolderPath('MyDocuments')) -ChildPath 'PowerShell\Modules'),
+    (Join-Path -Path $PSHOME -ChildPath 'Modules')
+)
+if ($isWin) { $ps7Paths += (Join-Path -Path $env:ProgramFiles -ChildPath 'PowerShell\Modules'), (Join-Path -Path $env:ProgramFiles -ChildPath 'WindowsPowerShell\Modules') }
+else { $ps7Paths += '/usr/local/share/powershell/Modules', (Join-Path -Path $HOME -ChildPath '.local/share/powershell/Modules') }
+function Test-IamPs7Path {
+    param([Parameter(Mandatory)][string]$Path)
+    foreach ($p in $ps7Paths) { if ($Path.StartsWith($p, [StringComparison]::OrdinalIgnoreCase)) { return $true } }
+    $false
+}
+$userWinPs = if ($isWin) { Join-Path -Path ([Environment]::GetFolderPath('MyDocuments')) -ChildPath 'WindowsPowerShell\Modules' }
+if ($userWinPs -and ($env:PSModulePath -split [IO.Path]::PathSeparator) -contains $userWinPs) {
+    Write-Warning 'This PowerShell 7 was started from Windows PowerShell and can see its modules too. Only modules in PowerShell 7''s own folders count here, so expect installs. Next time open PowerShell 7 directly.'
+}
+
 # ---- Read and check first ----
 if (-not $GraphVersion) {
     $GraphVersion = [version](Find-Module -Name 'Microsoft.Graph.Authentication' -Repository PSGallery).Version
 }
 $toInstall = @(foreach ($m in $graphModules) {
-        $have = @(Get-Module -ListAvailable -Name $m | Where-Object { $_.Version -eq $GraphVersion })
+        $have = @(Get-Module -ListAvailable -Name $m | Where-Object { $_.Version -eq $GraphVersion -and (Test-IamPs7Path -Path $_.ModuleBase) })
         if (-not $have.Count) { $m }
     })
-$exchangeMissing = $IncludeExchange -and -not (Get-Module -ListAvailable -Name ExchangeOnlineManagement)
+$exchangeMissing = $IncludeExchange -and -not @(Get-Module -ListAvailable -Name ExchangeOnlineManagement | Where-Object { Test-IamPs7Path -Path $_.ModuleBase }).Count
 $eventSource = $false
 if ($isWin) { try { $eventSource = [System.Diagnostics.EventLog]::SourceExists('IamAutomation') } catch { $eventSource = $false } }
 
@@ -149,7 +170,7 @@ if ($consoleScript) {
 
 # ---- Report only ----
 $ad = if (-not $isWin) { 'Not on Windows: cloud scripts only' }
-elseif (Get-Module -ListAvailable -Name ActiveDirectory) { 'Present: hybrid scripts can run here (domain-joined machine needed)' }
+elseif (@(Get-Module -ListAvailable -Name ActiveDirectory | Where-Object { (Test-IamPs7Path -Path $_.ModuleBase) -or ($_.ModuleBase -like "$env:windir\*") }).Count) { 'Present: hybrid scripts can run here (domain-joined machine needed)' }
 else { 'Missing: cloud scripts only. Hybrid needs RSAT (Windows 11: Add-WindowsCapability -Online -Name Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0)' }
 Add-IamResult -Step 'ActiveDirectory module' -Result $ad
 if ($isWin) { Add-IamResult -Step 'Execution policy' -Result "$(Get-ExecutionPolicy) (RemoteSigned or AllSigned: see the README for signing)" }

@@ -8,7 +8,12 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ### Added
 - `Setup/Install-IamAutomation.ps1`: sets up a machine in one run. Checks PowerShell 7, installs the eight Microsoft Graph submodules the scripts use, all at one version (newest or `-GraphVersion`; already-current ones skipped), optionally ExchangeOnlineManagement (`-IncludeExchange`), unblocks the files, registers the event log source when elevated, and adds a Start menu shortcut for the IAM console (`-ConsolePath`). Reports the ActiveDirectory module, execution policy and config without changing them. `-Scope AllUsers` for a shared jump box. Shows the plan and asks once.
+- `Connect-IamGraph` stops with a clear message, and how to fix it, when the Microsoft Graph modules are not installed for this PowerShell 7.
 - `Setup/Set-IamSignature.ps1`: signs every `.ps1` and `.psm1` in a deployed copy with your code-signing certificate (SHA256, timestamped) for `AllSigned` or AppLocker, and `-Verify` reports each file's signature. Refuses a git working copy unless `-Force`.
+
+### Fixed (found in the lab before release)
+- Installer: counted Graph modules installed for Windows PowerShell 5.1 as present when PowerShell 7 was started from it, so the console shortcut (a pwsh started on its own) could not find them. Only PowerShell 7's own module folders count now, with a warning when started from Windows PowerShell.
+- Installer: the console shortcut opened the console minimised. It opens in a normal window now, with `-STA`.
 
 ### Changed
 - README: install with `Install-IamAutomation.ps1` instead of the whole `Microsoft.Graph` roll-up, and a code signing section with a lab-only self-signed certificate.

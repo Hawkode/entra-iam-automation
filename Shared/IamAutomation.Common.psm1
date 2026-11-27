@@ -844,6 +844,10 @@ function Connect-IamGraph {
         [string]$ClientId = $script:IamGraphClientId
     )
     Assert-IamGraphHost
+    if (-not (Get-Command -Name Connect-MgGraph -ErrorAction SilentlyContinue)) {
+        throw ('The Microsoft Graph PowerShell modules are not installed for this PowerShell 7. Run .\Setup\Install-IamAutomation.ps1 ' +
+            'from a PowerShell 7 window opened directly (modules installed from Windows PowerShell only show up in a pwsh started from it). Nothing was changed.')
+    }
     $connect = @{ TenantId = $TenantId; Scopes = $Scopes; NoWelcome = $true; ErrorAction = 'Stop' }
     if ($ClientId) { $connect.ClientId = $ClientId }
     Connect-MgGraph @connect
