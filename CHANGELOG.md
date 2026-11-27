@@ -16,8 +16,12 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 - Installer: reported a module as installed when `Install-Module` had only warned that it was in use by another session. It now checks each module landed, and says NOT installed otherwise.
 - Installer: the console shortcut opened the console minimised. It opens in a normal window now, with `-STA`.
 
+### Tested in the lab
+- `Install-IamAutomation.ps1` on a deployed copy, CurrentUser then AllUsers: modules skipped when current, installed into PowerShell 7's folders, a module in use detected, Start menu shortcut opens the console.
+- `Set-IamSignature.ps1` with a self-signed code-signing certificate: 25 files signed and timestamped, `-Verify` all valid, a report run under `AllSigned` (Microsoft's module publishers trusted once), an edited script refused as not digitally signed.
+
 ### Changed
-- README: install with `Install-IamAutomation.ps1` instead of the whole `Microsoft.Graph` roll-up, and a code signing section with a lab-only self-signed certificate.
+- README: install with `Install-IamAutomation.ps1` instead of the whole `Microsoft.Graph` roll-up, open PowerShell 7 directly, `-Scope AllUsers` when Documents is in OneDrive, and a code signing section with a lab-only self-signed certificate.
 
 ## [1.7.0] - 2026-11-27
 

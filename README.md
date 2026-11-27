@@ -36,6 +36,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
    .\Setup\Install-IamAutomation.ps1 -WhatIf
    .\Setup\Install-IamAutomation.ps1                     # or -Scope AllUsers, elevated, on a shared jump box
    ```
+   Open PowerShell 7 directly from Start, not by typing `pwsh` in Windows PowerShell: a pwsh started from Windows PowerShell also sees modules installed for 5.1, which the console shortcut does not. If Documents is in OneDrive, use `-Scope AllUsers` (elevated), so hundreds of MB of modules stay out of OneDrive. Close other PowerShell windows first: a module in use cannot be replaced, and the installer then reports it as NOT installed.
 3. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
    ```powershell
    .\Setup\New-IamConfig.ps1 -WhatIf   # shows the file it would write
@@ -228,8 +229,8 @@ $cert.Thumbprint
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
-| Setup/Install-IamAutomation.ps1 | Built, not run yet |
-| Setup/Set-IamSignature.ps1 | Built, not run yet |
+| Setup/Install-IamAutomation.ps1 | Done, tested in lab: `-WhatIf`, CurrentUser and AllUsers, modules already current skipped, a module in use reported, console shortcut opens the console. Found and fixed before release: modules for Windows PowerShell counted as present, minimised shortcut |
+| Setup/Set-IamSignature.ps1 | Done, tested in lab with a self-signed certificate: 25 files signed and timestamped, `-Verify`, scripts run under `AllSigned`, an edited script refused |
 | Setup/Register-IamEventSource.ps1, event log copy of every log line | Done, tested in lab: file only with one warning before registering, events with ID, Windows account and computer after, and a normal user refused when clearing the log |
 | Setup/New-IamAppRegistration.ps1 | Done, tested in lab: `-WhatIf` and a real run (app, Assignment required, admin consent for 15 scopes, group assigned, `GraphClientId` written). A User Administrator who got "Need admin approval" through Microsoft Graph Command Line Tools then signed in through the app with no consent, and a background script signed in silently through it |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
