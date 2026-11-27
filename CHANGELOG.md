@@ -5,7 +5,11 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 ## [Unreleased]
 
 ### Added
+- Both leavers list the user's Entra devices under the manual follow-up items: retire or wipe a company device (Entra or hybrid joined), remove company data from a personal one (registered), with OS and last sign-in. With a OneDrive (SharePoint plan), an item to hand it over to the manager. Read-only: nothing on the device or in OneDrive changes. A failed device lookup becomes an item to check by hand, with the reason in the log.
 - `docs/ADMIN-RUNBOOK.md`: install order, adding and removing operators, upgrade with rollback, routine checks, recovering from a wrong run, troubleshooting from the lab, decommission.
+
+### Changed
+- Both leavers also request `Directory.Read.All` (read-only), so Graph returns the device names. Through Microsoft Graph Command Line Tools this asks for consent once more. Your own app registration already has it.
 
 ## [1.8.0] - 2026-11-27
 

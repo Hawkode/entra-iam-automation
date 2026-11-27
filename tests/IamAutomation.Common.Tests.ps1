@@ -399,6 +399,74 @@ Describe 'Test-IamExchangePlan' {
     }
 }
 
+Describe 'Test-IamOneDrivePlan' {
+    It 'is <Expected> for <Case>' -ForEach @(
+        @{ Case = 'an enabled SharePoint plan'; Service = 'SharePoint'; Status = 'Enabled'; Expected = $true }
+        @{ Case = 'a suspended SharePoint plan'; Service = 'SharePoint'; Status = 'Suspended'; Expected = $false }
+        @{ Case = 'Exchange only'; Service = 'exchange'; Status = 'Enabled'; Expected = $false }
+    ) {
+        $user = [pscustomobject]@{ AssignedPlans = @([pscustomobject]@{ Service = $Service; CapabilityStatus = $Status }) }
+        Test-IamOneDrivePlan -User $user | Should -Be $Expected
+    }
+}
+
+Describe 'Get-IamLeaverHandover' {
+    BeforeAll {
+        $script:boss = [pscustomobject]@{ UserPrincipalName = 'boss@lab.example.org'; AccountEnabled = $true }
+    }
+
+    BeforeEach {
+        Mock Write-IamLog -ModuleName IamAutomation.Common
+    }
+
+    It 'lists each device once, company and personal, with the last sign-in' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common -ParameterFilter { $Uri -like '*/registeredDevices/*' } -MockWith {
+            @{ id = 'd1'; displayName = 'LAPTOP-01'; operatingSystem = 'Windows'; trustType = 'AzureAd'; approximateLastSignInDateTime = '2026-11-20T09:15:00Z' }
+            @{ id = 'd2'; displayName = 'iPhone'; operatingSystem = 'iOS'; trustType = 'Workplace'; approximateLastSignInDateTime = $null }
+        }
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common -ParameterFilter { $Uri -like '*/ownedDevices/*' } -MockWith { @{ id = 'd1'; displayName = 'LAPTOP-01'; operatingSystem = 'Windows'; trustType = 'AzureAd'; approximateLastSignInDateTime = '2026-11-20T09:15:00Z' } }
+        $items = @(Get-IamLeaverHandover -UserId 'u1' -HasOneDrive $false)
+        $items.Count | Should -Be 2
+        $items[0] | Should -Be 'Device (remove company data, personal device): iPhone - iOS, registered, no sign-in recorded'
+        $items[1] | Should -Be 'Device (retire or wipe, collect the hardware): LAPTOP-01 - Windows, Entra joined, last sign-in 20 Nov 2026'
+    }
+
+    It 'asks for the OneDrive handover to the manager' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common
+        $items = @(Get-IamLeaverHandover -UserId 'u1' -Manager $script:boss -HasOneDrive $true)
+        $items | Should -Be @('OneDrive (hand over before the account is deleted): give boss@lab.example.org access or copy the files they need')
+    }
+
+    It 'says so when there is no manager for the OneDrive' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common
+        $items = @(Get-IamLeaverHandover -UserId 'u1' -HasOneDrive $true)
+        $items[0] | Should -BeLike '*no manager set*'
+    }
+
+    It 'returns nothing with no devices and no OneDrive' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common
+        @(Get-IamLeaverHandover -UserId 'u1' -HasOneDrive $false).Count | Should -Be 0
+    }
+
+    It 'turns a failed device lookup into a manual item and still adds the OneDrive item' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common -MockWith { throw 'Forbidden' }
+        $items = @(Get-IamLeaverHandover -UserId 'u1' -Manager $script:boss -HasOneDrive $true)
+        $items.Count | Should -Be 2
+        $items[0] | Should -Be "Devices: lookup did not complete, check the user's devices by hand (reason in the log)"
+        Should -Invoke Write-IamLog -ModuleName IamAutomation.Common -Times 1 -Exactly -ParameterFilter { $Message -like '*Forbidden*' }
+        $items[1] | Should -BeLike 'OneDrive*'
+    }
+
+    It 'uses no wording the IAM console reads as a failed step' {
+        Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common -MockWith {
+            @{ id = 'd1'; displayName = 'LAPTOP-01'; operatingSystem = 'Windows'; trustType = 'AzureAd'; approximateLastSignInDateTime = '2026-11-20T09:15:00Z' }
+            @{ id = 'd2'; displayName = 'iPhone'; operatingSystem = 'iOS'; trustType = 'Workplace'; approximateLastSignInDateTime = $null }
+        }
+        $items = @(Get-IamLeaverHandover -UserId 'u1' -HasOneDrive $true)
+        @($items | Where-Object { $_ -match 'fail|not removed|not cleared|not reset|still enabled' }).Count | Should -Be 0
+    }
+}
+
 Describe 'Resolve-IamDelegate' {
     It 'reports a missing manager' {
         $d = Resolve-IamDelegate -Manager $null

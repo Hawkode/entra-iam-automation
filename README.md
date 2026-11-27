@@ -101,7 +101,7 @@ Assigning a group needs Entra ID P1. Without it, name the operators with `-Opera
 |---|---|---|
 | `New-CloudJoiner.ps1` | Creates users (single or CSV), sets department and usage location, assigns the licence | `User.ReadWrite.All`, `LicenseAssignment.Read.All` |
 | `Move-CloudUser.ps1` | Changes department so dynamic groups re-scope access, lists assigned groups and roles that do not move | `User.ReadWrite.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` |
-| `Disable-CloudLeaver.ps1` | Disables, resets the password to a random value, revokes sessions, removes assigned groups and direct licences, clears department. Options below | `User.ReadWrite.All`, `User-PasswordProfile.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+| `Disable-CloudLeaver.ps1` | Disables, resets the password to a random value, revokes sessions, removes assigned groups and direct licences, clears department. Lists the user's devices and the OneDrive handover for a person. Options below | `User.ReadWrite.All`, `User-PasswordProfile.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory`, `Directory.Read.All` |
 
 Both joiners take `-Manager <upn>` (or a `Manager` CSV column), and `-PassThru` to return the results with the temporary password as objects instead of a table, for a GUI or another script. Both movers take `-Manager` too, and warn when the department changes but the manager does not. Both leavers take `-PassThru` too: the plan and manual items under `-WhatIf`, the CSV row with the plan, manual items and CSV path after a run. Both movers also take `-PassThru`: one result object (plan, before and after, review items, CSV path, and for hybrid the OU and sync result) instead of the table, also under `-WhatIf`. The leavers use the manager to hand over the mailbox.
 
@@ -110,7 +110,7 @@ Both joiners take `-Manager <upn>` (or a `Manager` CSV column), and `-PassThru` 
 |---|---|---|
 | `New-HybridJoiner.ps1` | Creates the user in AD in the department's OU, runs a delta sync, waits for the user in Entra ID, sets usage location and assigns the licence. `-ResumeUserPrincipalName` finishes the cloud steps later if the sync is slow | `User.ReadWrite.All`, `LicenseAssignment.Read.All`, `User.Read` |
 | `Move-HybridUser.ps1` | Changes department and title in AD, moves the account to the new department's OU, syncs. Lists AD groups, cloud-only groups and roles that do not move | `User.Read.All`, `GroupMember.Read.All`, `RoleManagement.Read.Directory` (read-only) |
-| `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory` |
+| `Disable-HybridLeaver.ps1` | Disables and resets the password in AD, records and removes AD groups, clears department, stamps the description with date, ticket and operator, moves to `LeaversOU`, syncs, waits for the cloud account to show as disabled, then revokes sessions and removes cloud groups and direct licences. Lists the user's devices and the OneDrive handover for a person | `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `RoleManagement.Read.Directory`, `Directory.Read.All` |
 
 ### Hybrid requirements
 - RSAT Active Directory module on the machine you run from (Windows 11: Settings > System > Optional features).
@@ -220,7 +220,7 @@ $cert.Thumbprint
 ```
 
 ## Known limitations
-- The leavers do not handle OneDrive handover, devices or shared credentials. Keep those in your offboarding checklist.
+- The leavers list devices and the OneDrive handover for a person, but change neither: retiring or wiping a device and moving files stay manual. Hybrid joined devices often have no registered owner and are then missing from the list. Shared credentials and assets are not covered. Keep those in your offboarding checklist.
 - `-RemoveAuthMethods` reports any method type it does not recognise for manual removal. Graph cannot remove the default method while another method remains, so one unrecognised method can leave the default in place too.
 - The hybrid joiner does not provision mailboxes through on-prem Exchange (`Enable-RemoteMailbox`). It fits tenants where Exchange Online creates the mailbox when the licence is assigned.
 - The joiner assigns one licence SKU per run. For per-department licences, use group-based licensing and `-SkipLicense`.
@@ -245,10 +245,10 @@ $cert.Thumbprint
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence, a returned file in Excel's CSV format: no quotes, TRUE/FALSE, ANSI without BOM, CRLF). A file saved by Excel itself untested (no Excel licence in the lab) |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
 | Cloud/Move-CloudUser.ps1 | Done, tested in lab (`-Manager` with `-WhatIf`; `-PassThru` preview, nothing-to-change and move through the IAM console) |
-| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). `-PassThru`, password reset and `-RemoveAuthMethods` (TAP; Microsoft Authenticator as the default method, with a TAP) tested through the IAM console. Group-assigned licences, phone removal, the default-method retry (the default was listed last, so it may not have run) and `-ConvertMailbox` tested offline only |
+| Cloud/Disable-CloudLeaver.ps1 | Done, tested in lab (direct licences, `-RemoveAuthMethods` with TAP and email). `-PassThru`, password reset and `-RemoveAuthMethods` (TAP; Microsoft Authenticator as the default method, with a TAP) tested through the IAM console. Group-assigned licences, phone removal, the default-method retry (the default was listed last, so it may not have run) and `-ConvertMailbox` tested offline only. Device and OneDrive items: unit tests only, lab test next |
 | Hybrid/New-HybridJoiner.ps1 | Done, tested in hybrid lab (AD DS + Entra Connect): single user, CSV (two departments, one sync), `-ResumeUserPrincipalName` after a forced sync timeout, soft-match guard. Verified-domain check tested in lab |
 | Hybrid/Move-HybridUser.ps1 | Done, tested in hybrid lab: department, title and OU change, review list, sync guard, source-anchor lookup (including a user whose AD and cloud UPNs differ), `-PassThru` preview and move with OU change and sync result through the IAM console |
-| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab). `-PassThru` and `-RemoveAuthMethods` (none registered) tested through the IAM console |
+| Hybrid/Disable-HybridLeaver.ps1 | Done, tested in hybrid lab (Leavers OU in sync scope, direct licence, no mailbox). Source-anchor lookup tested in lab. `-ConvertMailbox` tested offline only (no Exchange in the lab). `-PassThru` and `-RemoveAuthMethods` (none registered) tested through the IAM console. Device and OneDrive items: unit tests only, lab test next |
 
 Hybrid lab evidence: [Hybrid IAM: Testing JML Automation Through Entra Connect](https://hawkode.github.io/projects/hybrid-hardening-lab/) and [hybrid-hardening-lab](https://github.com/Hawkode/hybrid-hardening-lab/blob/main/docs/06-hybrid-jml.md).
 

@@ -643,6 +643,82 @@ function Test-IamExchangePlan {
     [bool](@($User.AssignedPlans) | Where-Object { $_.Service -eq 'exchange' -and $_.CapabilityStatus -eq 'Enabled' })
 }
 
+function Test-IamOneDrivePlan {
+    <#
+    .SYNOPSIS
+        True if the user's assigned plans include an enabled SharePoint Online service plan,
+        so the user has a OneDrive to hand over. Pass a user with AssignedPlans.
+    #>
+    param([Parameter(Mandatory)]$User)
+    [bool](@($User.AssignedPlans) | Where-Object { $_.Service -eq 'SharePoint' -and $_.CapabilityStatus -eq 'Enabled' })
+}
+
+function Get-IamLeaverHandover {
+    <#
+    .SYNOPSIS
+        Manual follow-up items for a leaver's devices and OneDrive. Read-only.
+    .DESCRIPTION
+        Lists the Entra devices the user registered or owns (Entra joined, hybrid joined,
+        registered), each as one item: retire or wipe a company device, remove company data
+        from a personal (registered) one. Adds a OneDrive handover item for the manager when
+        the user has a OneDrive. A failed device lookup becomes an item to check by hand, so
+        the leaver plan never stops on it.
+        Hybrid joined devices often have no registered owner and then do not show up here.
+        Needs Directory.Read.All (or Device.Read.All): with User.ReadWrite.All alone, Graph
+        returns the devices without their names.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$UserId,
+        $Manager,
+        [bool]$HasOneDrive
+    )
+    $items = @()
+    $select = '$select=id,displayName,operatingSystem,trustType,approximateLastSignInDateTime'
+    try {
+        $seen = @{}
+        $devices = @()
+        foreach ($rel in 'registeredDevices', 'ownedDevices') {
+            foreach ($d in (Invoke-IamGraphGetAll -Uri "v1.0/users/$UserId/$rel/microsoft.graph.device?$select")) {
+                if ($seen.ContainsKey("$($d.id)")) { continue }
+                $seen["$($d.id)"] = $true
+                $devices += $d
+            }
+        }
+        foreach ($d in ($devices | Sort-Object { "$($_.displayName)" })) {
+            $trust = switch ("$($d.trustType)") {
+                'AzureAd' { 'Entra joined' }
+                'ServerAd' { 'hybrid joined' }
+                'Workplace' { 'registered' }
+                default { 'join type unknown' }
+            }
+            $last = if ($d.approximateLastSignInDateTime) {
+                'last sign-in ' + ([datetime]$d.approximateLastSignInDateTime).ToString('dd MMM yyyy', [cultureinfo]::InvariantCulture)
+            }
+            else { 'no sign-in recorded' }
+            $name = if ($d.displayName) { $d.displayName } else { "device $($d.id)" }
+            $os = if ($d.operatingSystem) { $d.operatingSystem } else { 'OS unknown' }
+            $action = if ("$($d.trustType)" -eq 'Workplace') { 'remove company data, personal device' } else { 'retire or wipe, collect the hardware' }
+            $items += "Device ($action): $name - $os, $trust, $last"
+        }
+    }
+    catch {
+        # The reason goes to the log, not the item: a caller such as the IAM console reads words like
+        # "failed" in a manual item as a failed offboarding step.
+        Write-IamLog -Level WARN -Message "Device lookup for user ${UserId}: $($_.Exception.Message)"
+        $items += "Devices: lookup did not complete, check the user's devices by hand (reason in the log)"
+    }
+    if ($HasOneDrive) {
+        if ($Manager -and $Manager.UserPrincipalName) {
+            $items += "OneDrive (hand over before the account is deleted): give $($Manager.UserPrincipalName) access or copy the files they need"
+        }
+        else {
+            $items += 'OneDrive (hand over before the account is deleted): no manager set, agree who gets the files'
+        }
+    }
+    $items
+}
+
 function Resolve-IamDelegate {
     <#
     .SYNOPSIS
@@ -1112,6 +1188,7 @@ Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfi
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
+    Test-IamOneDrivePlan, Get-IamLeaverHandover,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
     Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap,

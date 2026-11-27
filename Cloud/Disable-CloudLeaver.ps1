@@ -25,8 +25,9 @@
       - Role-assignable, mail-enabled security and distribution groups, which Graph
         cannot change through this path.
 
-    Not covered, handle in your offboarding checklist: OneDrive handover, devices,
-    shared credentials, assets. Without -ConvertMailbox, a licensed mailbox is deleted
+    Listed for a person, not changed: the user's Entra devices (retire or wipe company devices,
+    remove company data from personal ones) and the OneDrive handover to the manager.
+    Not covered, handle in your offboarding checklist: shared credentials, assets. Without -ConvertMailbox, a licensed mailbox is deleted
     30 days after the licence goes: the plan warns about it.
 
     Cloud-only: stops if the user is synced from AD. Use Hybrid\Disable-HybridLeaver.ps1.
@@ -36,7 +37,7 @@
     or name the person with -DelegateTo, or use -NoDelegate.
 
     Graph scopes (delegated): User.ReadWrite.All, User-PasswordProfile.ReadWrite.All (password reset),
-      GroupMember.ReadWrite.All, RoleManagement.Read.Directory
+      GroupMember.ReadWrite.All, RoleManagement.Read.Directory, Directory.Read.All (device names)
       plus UserAuthenticationMethod.ReadWrite.All with -RemoveAuthMethods (Critical: requested only then)
     Roles: User Administrator (cannot disable admins, by design); Authentication Administrator
       for -RemoveAuthMethods; Exchange Recipient Management for -ConvertMailbox.
@@ -102,7 +103,7 @@ if (@($cfg.BreakGlassUpns) -contains $UserPrincipalName) {
     throw "$UserPrincipalName is a break-glass account. The leaver script will not touch it."
 }
 
-$scopes = @('User.ReadWrite.All', 'User-PasswordProfile.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
+$scopes = @('User.ReadWrite.All', 'User-PasswordProfile.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory', 'Directory.Read.All')
 if ($RemoveAuthMethods) { $scopes += 'UserAuthenticationMethod.ReadWrite.All' }
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes $scopes
 
@@ -142,6 +143,14 @@ $mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $UserPrincipalName -ConvertMa
     -WillRemoveLicence (-not $KeepLicense -and $directLicences -gt 0)
 $manual += $mbx.Manual
 $keepLicence = $KeepLicense -or $mbx.ForceKeepLicence
+
+# Devices and OneDrive: listed for a person, never changed here.
+$hasOneDrive = Test-IamOneDrivePlan -User $user
+if ($hasOneDrive -and -not $manager) {
+    try { $manager = Get-IamCloudManager -UserId $user.Id }
+    catch { Write-IamLog -Level WARN -Message "Manager lookup for the OneDrive handover: $($_.Exception.Message)" }
+}
+$manual += @(Get-IamLeaverHandover -UserId $user.Id -Manager $manager -HasOneDrive $hasOneDrive)
 
 $plan = @('disable account', 'reset password', 'revoke sessions')
 if ($RemoveAuthMethods) {

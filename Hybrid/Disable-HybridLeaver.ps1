@@ -43,7 +43,12 @@
     Reported, not removed: active directory roles (removing them would need
     RoleManagement.ReadWrite.Directory).
 
-    Graph scopes (delegated): User.ReadWrite.All, GroupMember.ReadWrite.All, RoleManagement.Read.Directory
+    Listed for a person, not changed: the user's Entra devices (retire or wipe company devices,
+    remove company data from personal ones) and the OneDrive handover to the manager. Hybrid
+    joined devices often have no registered owner, so check the user's computer in AD as well.
+
+    Graph scopes (delegated): User.ReadWrite.All, GroupMember.ReadWrite.All, RoleManagement.Read.Directory,
+      Directory.Read.All (device names)
       plus UserAuthenticationMethod.ReadWrite.All with -RemoveAuthMethods (Critical: requested only then)
     Roles: Authentication Administrator for -RemoveAuthMethods; Exchange Recipient
       Management for -ConvertMailbox.
@@ -130,7 +135,7 @@ if ($ad.SamAccountName -eq [Environment]::UserName) { throw 'You are signed in t
 try { $null = Get-ADOrganizationalUnit -Identity $cfg.LeaversOU }
 catch { throw "LeaversOU not found: $($cfg.LeaversOU)" }
 
-$scopes = @('User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory')
+$scopes = @('User.ReadWrite.All', 'GroupMember.ReadWrite.All', 'RoleManagement.Read.Directory', 'Directory.Read.All')
 if ($RemoveAuthMethods) { $scopes += 'UserAuthenticationMethod.ReadWrite.All' }
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes $scopes
 $cloud = Get-IamSyncedCloudUser -ObjectGuid $ad.ObjectGUID -ConsistencyGuid $ad.'mS-DS-ConsistencyGuid' -AdUserPrincipalName $UserPrincipalName
@@ -178,6 +183,11 @@ $mbx = Get-IamLeaverMailboxPlan -UserPrincipalName $cloudUpn -ConvertMailbox:$Co
     -WillRemoveLicence (-not $KeepLicense -and $directLicences -gt 0)
 $manual += $mbx.Manual
 $keepLicence = $KeepLicense -or $mbx.ForceKeepLicence
+
+# Devices and OneDrive: listed for a person, never changed here. Read now, before the sync can delete the cloud account.
+$hasOneDrive = Test-IamOneDrivePlan -User $cloudUser
+if ($hasOneDrive -and -not $manager) { $manager = Get-IamAdManager -DistinguishedName $ad.Manager }
+$manual += @(Get-IamLeaverHandover -UserId $cloud.Id -Manager $manager -HasOneDrive $hasOneDrive)
 
 $oldDN = $ad.DistinguishedName
 $stamp = 'Leaver {0:yyyy-MM-dd} {1} by {2}' -f (Get-Date), $Ticket, [Environment]::UserName
