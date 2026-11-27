@@ -5,10 +5,28 @@ $script:RepoRoot = Split-Path -Path $PSScriptRoot -Parent
 
 $script:IamGraphClientId = $null   # set by Import-IamConfig from GraphClientId
 
+# Windows Event Log copy of every log line (Setup\Register-IamEventSource.ps1 registers the source).
+$script:IamEventSource = 'IamAutomation'
+$script:IamEventLogOn = $null      # $null until the first line checks the source
+$script:IamEventWriter = {
+    param($Source, $Message, $Type, $Id)
+    [System.Diagnostics.EventLog]::WriteEntry($Source, $Message, $Type, $Id)
+}
+
 function Write-IamLog {
     <#
     .SYNOPSIS
-        Writes a timestamped line to output\iam-automation.log and to the console.
+        Writes a timestamped line to output\iam-automation.log, to the console and, on Windows with
+        the IamAutomation event source registered, to the Application event log.
+    .DESCRIPTION
+        The log file is a working copy anyone with access to the folder can edit. The event log copy
+        is the audit record: a user cannot edit or delete single events, and clearing the log is
+        itself logged (event 104 in the System log). Forward it to a collector or SIEM for a record
+        a local admin cannot touch either.
+
+        Event IDs: 1000 INFO, 2000 WARN, 3000 ERROR. Each event also names the Windows account and
+        computer. Without the source registered, the line goes to the file only, with one warning
+        per run.
     #>
     [CmdletBinding()]
     param(
@@ -20,6 +38,39 @@ function Write-IamLog {
     $line = '{0} [{1}] {2}' -f (Get-Date -Format 's'), $Level, $Message
     Add-Content -Path (Join-Path -Path $outDir -ChildPath 'iam-automation.log') -Value $line -WhatIf:$false
     Write-Information -MessageData $line -InformationAction Continue
+
+    if ($null -eq $script:IamEventLogOn) {
+        $script:IamEventLogOn = Test-IamEventSource
+        if (-not $script:IamEventLogOn -and ($PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows)) {
+            Write-Warning "Event log source '$script:IamEventSource' is not registered, so this run is logged to the file only. Register it once, as admin: .\Setup\Register-IamEventSource.ps1"
+        }
+    }
+    if ($script:IamEventLogOn) {
+        $type = @{ INFO = 'Information'; WARN = 'Warning'; ERROR = 'Error' }[$Level]
+        $id = @{ INFO = 1000; WARN = 2000; ERROR = 3000 }[$Level]
+        $text = "$Message`r`n`r`nWindows account: $([Environment]::UserDomainName)\$([Environment]::UserName)`r`nComputer: $env:COMPUTERNAME"
+        if ($text.Length -gt 31000) { $text = $text.Substring(0, 31000) }
+        try { & $script:IamEventWriter $script:IamEventSource $text $type $id }
+        catch {
+            $script:IamEventLogOn = $false
+            Write-Warning "Could not write to the event log, so the rest of this run is logged to the file only: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Test-IamEventSource {
+    <#
+    .SYNOPSIS
+        True when the IamAutomation event source is registered on this Windows machine.
+    .DESCRIPTION
+        Never registers it: that needs admin rights, once (Setup\Register-IamEventSource.ps1).
+        False on Linux and macOS, and when the check itself is refused.
+    #>
+    [CmdletBinding()]
+    param([string]$Source = $script:IamEventSource)
+    if (-not ($PSVersionTable.PSEdition -eq 'Desktop' -or $IsWindows)) { return $false }
+    try { [System.Diagnostics.EventLog]::SourceExists($Source) }
+    catch { $false }
 }
 
 function Import-IamConfig {
@@ -1053,7 +1104,7 @@ function Get-IamBreakGlassCandidate {
     }
 }
 
-Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
+Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,

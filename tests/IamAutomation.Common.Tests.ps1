@@ -316,6 +316,60 @@ Describe 'Output files' {
         }
     }
 
+    It 'Write-IamLog copies the line to the event log with the level, ID and Windows account' {
+        InModuleScope IamAutomation.Common -Parameters @{ Dir = $TestDrive } {
+            $saved = $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter
+            try {
+                $script:RepoRoot = $Dir
+                $script:IamEventLogOn = $true
+                $script:captured = [System.Collections.Generic.List[object]]::new()
+                $script:IamEventWriter = { param($s, $m, $t, $i) $script:captured.Add([pscustomobject]@{ Source = $s; Message = $m; Type = $t; Id = $i }) }
+                Write-IamLog -Message 'audit line' -Level WARN 6>$null
+                $script:captured.Count | Should -Be 1
+                $script:captured[0].Source | Should -Be 'IamAutomation'
+                $script:captured[0].Type | Should -Be 'Warning'
+                $script:captured[0].Id | Should -Be 2000
+                $script:captured[0].Message | Should -Match '^audit line'
+                $script:captured[0].Message | Should -Match 'Windows account: '
+            }
+            finally { $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter = $saved }
+        }
+    }
+
+    It 'Write-IamLog writes the file only when the event source is not registered' {
+        InModuleScope IamAutomation.Common -Parameters @{ Dir = $TestDrive } {
+            $saved = $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter
+            try {
+                $script:RepoRoot = $Dir
+                $script:IamEventLogOn = $false
+                $script:IamEventWriter = { throw 'event log reached' }
+                { Write-IamLog -Message 'file only' 6>$null } | Should -Not -Throw
+                (Get-Content -LiteralPath (Join-Path -Path (Join-Path -Path $Dir -ChildPath 'output') -ChildPath 'iam-automation.log'))[-1] | Should -Match 'file only$'
+            }
+            finally { $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter = $saved }
+        }
+    }
+
+    It 'Write-IamLog falls back to the file when an event log write fails' {
+        InModuleScope IamAutomation.Common -Parameters @{ Dir = $TestDrive } {
+            $saved = $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter
+            try {
+                $script:RepoRoot = $Dir
+                $script:IamEventLogOn = $true
+                $script:IamEventWriter = { throw 'access denied' }
+                { Write-IamLog -Message 'still in the file' 6>$null 3>$null } | Should -Not -Throw
+                $script:IamEventLogOn | Should -BeFalse
+                (Get-Content -LiteralPath (Join-Path -Path (Join-Path -Path $Dir -ChildPath 'output') -ChildPath 'iam-automation.log'))[-1] | Should -Match 'still in the file$'
+            }
+            finally { $script:RepoRoot, $script:IamEventLogOn, $script:IamEventWriter = $saved }
+        }
+    }
+
+    It 'Test-IamEventSource is false off Windows and never throws' {
+        { Test-IamEventSource -Source "IamTest$([guid]::NewGuid().ToString('N').Substring(0, 8))" } | Should -Not -Throw
+        Test-IamEventSource -Source "IamTest$([guid]::NewGuid().ToString('N').Substring(0, 8))" | Should -BeFalse
+    }
+
     It 'Write-IamLog rejects an unknown level' {
         { Write-IamLog -Message 'x' -Level DEBUG } | Should -Throw
     }

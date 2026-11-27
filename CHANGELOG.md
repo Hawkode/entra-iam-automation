@@ -4,6 +4,13 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-27
+
+### Added
+- Audit record in the Windows event log: every `Write-IamLog` line also goes to the Application log (source `IamAutomation`; ID 1000 information, 2000 warning, 3000 error), with the Windows account and computer. A user cannot edit or delete single events, unlike `output\iam-automation.log`. Without the source registered, scripts log to the file only and warn once per run. Linux and macOS: file only.
+- `Setup/Register-IamEventSource.ps1`: registers the source once per machine (admin), or removes it with `-Remove`.
+- `Test-IamEventSource`: whether the source is registered. It never registers it.
+
 ## [1.6.2] - 2026-11-27
 
 ### Fixed

@@ -13,7 +13,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Governance/` | Access review campaigns: extract per reviewer, then apply the decisions with evidence |
-| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know. `New-IamAppRegistration.ps1`: your own app registration for sign-in (recommended for teams) |
+| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know. `New-IamAppRegistration.ps1`: your own app registration for sign-in (recommended for teams). `Register-IamEventSource.ps1`: the event log source for the audit record |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
 
@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.6.2` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.7.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.6.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.7.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -187,6 +187,13 @@ A quarterly recertification without Entra ID P2: each group owner gets a CSV of 
 ## Output and logs
 Every script writes a timestamped CSV to `output/` and appends to `output/iam-automation.log`. Both contain UPNs: `output/` is gitignored, keep the folder out of OneDrive and other synced folders, and delete old files once they have served their purpose.
 
+**Audit record: the Windows event log.** The log file is a working copy that anyone with access to the folder can edit. On Windows, every log line also goes to the Application event log (source `IamAutomation`; ID 1000 information, 2000 warning, 3000 error), with the Windows account and computer. A user cannot edit or delete single events, and clearing the log is itself logged (event 104 in the System log). Register the source once per machine, as admin:
+```powershell
+.\Setup\Register-IamEventSource.ps1
+Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'IamAutomation' } -MaxEvents 20
+```
+Until it is registered, scripts log to the file only and warn once per run. A local admin can still clear the log: for a record nobody on the machine can touch, forward the events to a collector (Windows Event Forwarding) or a SIEM.
+
 ## Known limitations
 - The leavers do not handle OneDrive handover, devices or shared credentials. Keep those in your offboarding checklist.
 - `-RemoveAuthMethods` reports any method type it does not recognise for manual removal. Graph cannot remove the default method while another method remains, so one unrecognised method can leave the default in place too.
@@ -199,6 +206,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
+| Setup/Register-IamEventSource.ps1, event log copy of every log line | Built, not run yet |
 | Setup/New-IamAppRegistration.ps1 | Done, tested in lab: `-WhatIf` and a real run (app, Assignment required, admin consent for 15 scopes, group assigned, `GraphClientId` written). A User Administrator who got "Need admin approval" through Microsoft Graph Command Line Tools then signed in through the app with no consent, and a background script signed in silently through it |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab, including the IAM console run that found `User-PasswordProfile.ReadWrite.All` rated Low (fixed in v1.6.1) |
