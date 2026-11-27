@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.6.1` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.6.2` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.6.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.6.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -47,12 +47,14 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 
 **Consent:** without `GraphClientId`, the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user who runs Graph PowerShell in the tenant. Scripts use delegated sign-in only: no secrets, no certificates, no application permissions.
 
-**More than one operator? Use your own app registration.** A non-admin operator cannot consent to these scopes ("Need admin approval"). `Setup\New-IamAppRegistration.ps1` creates a single-tenant public client app with only the scopes these scripts use (`Get-IamGraphAppScope`), grants admin consent once, turns on **Assignment required** so only the operators you name can sign in through it, and writes `GraphClientId` to `config.local.psd1`. Every script and the IAM console then sign in through it. Aim a Conditional Access policy at the app afterwards. Needs Global Administrator or Privileged Role Administrator, once:
+**More than one operator? Use your own app registration.** A non-admin operator cannot consent to these scopes ("Need admin approval"). `Setup\New-IamAppRegistration.ps1` creates a single-tenant public client app with only the scopes these scripts use (`Get-IamGraphAppScope`), grants admin consent once, turns on **Assignment required** so only the operators you name can sign in through it, and writes `GraphClientId` to `config.local.psd1`. Every script and the IAM console then sign in through it. Needs Global Administrator or Privileged Role Administrator, once:
 ```powershell
 .\Setup\New-IamAppRegistration.ps1 -OperatorGroup 'IAM Operators' -WhatIf
 .\Setup\New-IamAppRegistration.ps1 -OperatorGroup 'IAM Operators'
 ```
 Assigning a group needs Entra ID P1. Without it, name the operators with `-OperatorUpn`.
+
+**Conditional Access for the operators, not the app.** Conditional Access cannot target a public client app (error 1034, `PublicClientsAreUnsupported`): it judges the resource signed in to, Microsoft Graph, not the tool. So aim the policy at the people: include the operator group and the admin roles they hold, exclude the break-glass accounts, target all resources, and require phishing-resistant MFA, a compliant or hybrid-joined device, and a short sign-in frequency (for example 4 hours). Start in report-only and check the sign-in logs before turning it on.
 
 ### Before you run it in production
 - **Approval:** get written approval before the first run, including read-only reports. They read directory data and write it to CSV.

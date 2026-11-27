@@ -10,7 +10,7 @@ Run from the repo folder, signed in with an admin account.
 
 ## Setup (once)
 ```powershell
-git clone --branch v1.6.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+git clone --branch v1.6.2 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
 cd C:\Tools\entra-iam-automation
 .\Setup\New-IamConfig.ps1 -WhatIf   # gathers the values, writes nothing
 .\Setup\New-IamConfig.ps1           # writes config.local.psd1 after you confirm

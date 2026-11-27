@@ -4,6 +4,14 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-11-27
+
+### Fixed
+- `New-IamAppRegistration.ps1` and the README said to aim a Conditional Access policy at the app. Conditional Access cannot target a public client app (error 1034, `PublicClientsAreUnsupported`), because it judges the resource signed in to (Microsoft Graph), not the tool. Both now say to aim the policy at the operators: their group and admin roles, all resources.
+
+### Tested in the lab
+- A Conditional Access policy for the operator group (all resources, MFA, 4-hour sign-in frequency) applied to a User Administrator signing in through the own app registration, in report-only.
+
 ## [1.6.1] - 2026-11-27
 
 ### Fixed

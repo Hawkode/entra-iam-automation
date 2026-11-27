@@ -18,8 +18,11 @@
 
     A delegated scope never lets an operator do more than their Entra role allows.
 
-    Afterwards, aim a Conditional Access policy at the app (phishing-resistant MFA, compliant or
-    admin device). The last log line gives the app ID to target.
+    Afterwards, add a Conditional Access policy for the operators, not for the app: Conditional
+    Access cannot target a public client app (error 1034, PublicClientsAreUnsupported), because
+    it judges the resource signed in to (Microsoft Graph), not the tool. Include the operator
+    group and the admin roles they hold, all resources, and require phishing-resistant MFA, a
+    compliant or hybrid-joined device and a short sign-in frequency.
 
     Writes: the app registration, its enterprise app, the consent grant, the operator
     assignments, and GraphClientId in config.local.psd1 (after a backup). Asks once first.
@@ -176,7 +179,7 @@ Copy-Item -LiteralPath $Path -Destination $backup
 Set-Content -LiteralPath $Path -Value $text -Encoding utf8 -NoNewline -WhatIf:$false
 $null = Import-IamConfig -Path $Path
 Write-IamLog -Message "GraphClientId written to $Path (backup: $backup)"
-Write-IamLog -Message "Next: Conditional Access policy aimed at app ID $($app.appId), then Disconnect-MgGraph and sign in again so the scripts use the new app."
+Write-IamLog -Message "Next: Disconnect-MgGraph and sign in again so the scripts use the new app. Then a Conditional Access policy for the operators (group and admin roles, all resources): Conditional Access cannot target a public client app."
 
 [pscustomobject]@{
     DisplayName        = $DisplayName
