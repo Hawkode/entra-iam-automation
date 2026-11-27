@@ -242,7 +242,7 @@ $cert.Thumbprint
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` tested in hybrid lab, including a user whose AD and cloud UPNs differ |
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
-| Reports/Get-UnusedLicences.ps1 | Built, unit tests only, lab test next |
+| Reports/Get-UnusedLicences.ps1 | Done, tested in lab: as Global Administrator (disabled, inactive, break-glass, group and direct assignment, summary per licence) and as User Administrator (no sign-in data: warning, disabled accounts only). Found the silent 403 in `Get-StaleAccounts` too (fixed) |
 | Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence, a returned file in Excel's CSV format: no quotes, TRUE/FALSE, ANSI without BOM, CRLF). A file saved by Excel itself untested (no Excel licence in the lab) |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |
