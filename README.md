@@ -13,35 +13,40 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Governance/` | Access review campaigns: extract per reviewer, then apply the decisions with evidence |
-| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know. `New-IamAppRegistration.ps1`: your own app registration for sign-in (recommended for teams). `Register-IamEventSource.ps1`: the event log source for the audit record |
+| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know. `New-IamAppRegistration.ps1`: your own app registration for sign-in (recommended for teams). `Register-IamEventSource.ps1`: the event log source for the audit record. `Install-IamAutomation.ps1`: sets up a machine. `Set-IamSignature.ps1`: signs the scripts for `AllSigned` |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
 
 ## Requirements
 - PowerShell 7. The Microsoft Graph SDK (2.34 and later) cannot sign in on Windows PowerShell 5.1, so every script that signs in stops there before it changes anything.
-- Microsoft Graph PowerShell SDK: `Install-Module Microsoft.Graph -Scope CurrentUser`
-- For the leavers' `-ConvertMailbox` only: `Install-Module ExchangeOnlineManagement -Scope CurrentUser`
+- Microsoft Graph PowerShell SDK: only the submodules the scripts use, all at one version. `Setup\Install-IamAutomation.ps1` installs them (step 2 below).
+- For the leavers' `-ConvertMailbox` only: ExchangeOnlineManagement (`Install-IamAutomation.ps1 -IncludeExchange`).
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
 - Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.7.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.8.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.7.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.8.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
-2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
+2. Set up the machine: Graph modules (one version, only the ones the scripts use), unblocked files, the event log source when elevated, and with `-ConsolePath` a Start menu shortcut for the IAM console. It shows the plan and asks once:
+   ```powershell
+   .\Setup\Install-IamAutomation.ps1 -WhatIf
+   .\Setup\Install-IamAutomation.ps1                     # or -Scope AllUsers, elevated, on a shared jump box
+   ```
+3. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
    ```powershell
    .\Setup\New-IamConfig.ps1 -WhatIf   # shows the file it would write
    .\Setup\New-IamConfig.ps1
    ```
    Or copy `config.example.psd1` to `config.local.psd1` and replace every example value by hand (reference below). `config.local.psd1` is gitignored. Scripts refuse to run while a value they need is empty or still holds an example value.
-3. Run a read-only report first. It proves sign-in, consent and the module work in your tenant:
+4. Run a read-only report first. It proves sign-in, consent and the module work in your tenant:
    ```powershell
    .\Reports\Get-RiskyAppPermissions.ps1
    ```
-4. Run lifecycle scripts with `-WhatIf`, then for real on a test user, then in normal use.
+5. Run lifecycle scripts with `-WhatIf`, then for real on a test user, then in normal use.
 
 **Hybrid tenants (users synced from AD DS):** use the `Hybrid/` lifecycle scripts. The `Cloud/` scripts refuse synced users by design, and the `Hybrid/` scripts refuse cloud-only users. See [Hybrid lifecycle](#hybrid-lifecycle) for the extra requirements.
 
@@ -194,6 +199,23 @@ Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'IamAut
 ```
 Until it is registered, scripts log to the file only and warn once per run. A local admin can still clear the log: for a record nobody on the machine can touch, forward the events to a collector (Windows Event Forwarding) or a SIEM.
 
+## Code signing (AllSigned)
+Where the execution policy is `AllSigned`, or AppLocker allows signed scripts only, sign a deployed copy with your organisation's code-signing certificate, then check it. Sign again after every update: any edit breaks a file's signature.
+```powershell
+.\Setup\Set-IamSignature.ps1 -Path C:\Tools\entra-iam-automation -Thumbprint <your code-signing certificate thumbprint>
+.\Setup\Set-IamSignature.ps1 -Path C:\Tools\entra-iam-automation -Verify
+```
+It refuses a git working copy unless you add `-Force`, because the signature blocks show up as changes. Modules from the PowerShell Gallery are signed by Microsoft: under `AllSigned`, PowerShell asks once whether to trust that publisher.
+
+Lab only, a self-signed certificate (trust it on that machine only, and never on a real fleet):
+```powershell
+$cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=IAM Automation lab signing' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddMonths(6)
+Export-Certificate -Cert $cert -FilePath "$env:TEMP\iam-lab-signing.cer" | Out-Null
+Import-Certificate -FilePath "$env:TEMP\iam-lab-signing.cer" -CertStoreLocation Cert:\CurrentUser\Root
+Import-Certificate -FilePath "$env:TEMP\iam-lab-signing.cer" -CertStoreLocation Cert:\CurrentUser\TrustedPublisher
+$cert.Thumbprint
+```
+
 ## Known limitations
 - The leavers do not handle OneDrive handover, devices or shared credentials. Keep those in your offboarding checklist.
 - `-RemoveAuthMethods` reports any method type it does not recognise for manual removal. Graph cannot remove the default method while another method remains, so one unrecognised method can leave the default in place too.
@@ -206,6 +228,8 @@ Until it is registered, scripts log to the file only and warn once per run. A lo
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
+| Setup/Install-IamAutomation.ps1 | Built, not run yet |
+| Setup/Set-IamSignature.ps1 | Built, not run yet |
 | Setup/Register-IamEventSource.ps1, event log copy of every log line | Done, tested in lab: file only with one warning before registering, events with ID, Windows account and computer after, and a normal user refused when clearing the log |
 | Setup/New-IamAppRegistration.ps1 | Done, tested in lab: `-WhatIf` and a real run (app, Assignment required, admin consent for 15 scopes, group assigned, `GraphClientId` written). A User Administrator who got "Need admin approval" through Microsoft Graph Command Line Tools then signed in through the app with no consent, and a background script signed in silently through it |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |

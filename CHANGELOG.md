@@ -4,6 +4,15 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-27
+
+### Added
+- `Setup/Install-IamAutomation.ps1`: sets up a machine in one run. Checks PowerShell 7, installs the eight Microsoft Graph submodules the scripts use, all at one version (newest or `-GraphVersion`; already-current ones skipped), optionally ExchangeOnlineManagement (`-IncludeExchange`), unblocks the files, registers the event log source when elevated, and adds a Start menu shortcut for the IAM console (`-ConsolePath`). Reports the ActiveDirectory module, execution policy and config without changing them. `-Scope AllUsers` for a shared jump box. Shows the plan and asks once.
+- `Setup/Set-IamSignature.ps1`: signs every `.ps1` and `.psm1` in a deployed copy with your code-signing certificate (SHA256, timestamped) for `AllSigned` or AppLocker, and `-Verify` reports each file's signature. Refuses a git working copy unless `-Force`.
+
+### Changed
+- README: install with `Install-IamAutomation.ps1` instead of the whole `Microsoft.Graph` roll-up, and a code signing section with a lab-only self-signed certificate.
+
 ## [1.7.0] - 2026-11-27
 
 ### Added
