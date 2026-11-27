@@ -5,7 +5,12 @@
 .DESCRIPTION
     Lists application permissions and delegated grants on Microsoft Graph,
     tags each with a risk tier, and for Critical/High rows checks whether the
-    app has a credential (secret or certificate) that could be stolen.
+    app has a credential (secret or certificate) that could be stolen. Other rows
+    show HasCredential as "Not checked".
+
+    A write permission (ReadWrite, FullControl, Send) that is not in the tier list is
+    rated Medium, so an unknown write scope is never reported as Low. Read it and
+    add it to the right tier.
 
     Tenant-wide delegated grants (consented for all users) are always shown,
     whatever their tier, because the grant itself is a finding. The standard
@@ -34,10 +39,15 @@ Import-Module (Join-Path -Path $PSScriptRoot -ChildPath '..\Shared\IamAutomation
 $cfg = Import-IamConfig
 Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'Application.Read.All', 'DelegatedPermissionGrant.Read.All'
 
-# Critical = direct path to Global Admin or tenant takeover.
+# Critical = direct path to Global Admin or tenant takeover: assign roles (directly or through PIM),
+# grant permissions, take over sign-in (password, authentication methods, federated domains),
+# or switch off Conditional Access.
 $tiers = @{
     Critical = @('RoleManagement.ReadWrite.Directory', 'AppRoleAssignment.ReadWrite.All', 'Application.ReadWrite.All',
-        'Directory.ReadWrite.All', 'UserAuthenticationMethod.ReadWrite.All', 'Policy.ReadWrite.ConditionalAccess')
+        'Directory.ReadWrite.All', 'UserAuthenticationMethod.ReadWrite.All', 'Policy.ReadWrite.ConditionalAccess',
+        'User-PasswordProfile.ReadWrite.All', 'DelegatedPermissionGrant.ReadWrite.All', 'Domain.ReadWrite.All',
+        'RoleAssignmentSchedule.ReadWrite.Directory', 'RoleEligibilitySchedule.ReadWrite.Directory',
+        'PrivilegedAccess.ReadWrite.AzureADGroup')
     High     = @('User.ReadWrite.All', 'Group.ReadWrite.All', 'GroupMember.ReadWrite.All', 'Mail.ReadWrite', 'Mail.Send',
         'Files.ReadWrite.All', 'Sites.ReadWrite.All', 'Sites.FullControl.All')
     Medium   = @('Directory.Read.All', 'User.Read.All', 'Group.Read.All', 'Mail.Read', 'Files.Read.All',
@@ -49,6 +59,7 @@ $signInScopes = @('openid', 'profile', 'email', 'offline_access', 'User.Read')
 function Get-PermissionRisk {
     param([string]$Permission)
     foreach ($t in 'Critical', 'High', 'Medium') { if ($tiers[$t] -contains $Permission) { return $t } }
+    if ($Permission -match 'ReadWrite|FullControl|\.Send') { return 'Medium' }   # unknown write scope: check it
     'Low'
 }
 
@@ -87,7 +98,7 @@ foreach ($g in $appGrants) {
             Type          = 'Application'
             Permission    = $perm
             Risk          = Get-PermissionRisk -Permission $perm
-            HasCredential = $null
+            HasCredential = 'Not checked'
             ThisTenantApp = [string]$sp.AppOwnerOrganizationId -eq $cfg.TenantId
             SpId          = $sp.Id
         })
@@ -104,7 +115,7 @@ foreach ($d in $delegated) {
                 Type          = $type
                 Permission    = $perm
                 Risk          = Get-PermissionRisk -Permission $perm
-                HasCredential = $null
+                HasCredential = 'Not checked'
                 ThisTenantApp = [string]$sp.AppOwnerOrganizationId -eq $cfg.TenantId
                 SpId          = $sp.Id
             })

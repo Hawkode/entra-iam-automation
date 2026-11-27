@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.6.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.6.1` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.6.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.6.1 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -142,7 +142,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 - **Leavers:** list the full plan, then ask for confirmation once. Refuse break-glass accounts and the signed-in admin. The hybrid leaver also refuses AD protected accounts (`adminCount = 1`, members of Domain Admins and similar), which need a Tier 0 admin.
 - **Hybrid leaver order:** sessions are revoked only after Entra ID shows the account as disabled. Before that, with password hash sync, the old password still works in the cloud.
 - **Not automated on purpose:** removing directory roles (would need `RoleManagement.ReadWrite.Directory`). Reported for manual action instead.
-- **Critical scopes only on request:** `UserAuthenticationMethod.ReadWrite.All` is requested only when `-RemoveAuthMethods` is used.
+- **Critical scopes only on request:** `UserAuthenticationMethod.ReadWrite.All` is requested only when `-RemoveAuthMethods` is used. An own app registration (`GraphClientId`) is consented for it up front, because its operators cannot consent themselves: the Entra role (Authentication Administrator) is then the only gate, so keep the app's assignment list short.
 - **Temporary passwords** are shown once in the console and never logged or written to CSV.
 
 ## Reports
@@ -199,7 +199,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Shared module | Done, tested in lab |
 | Setup/New-IamAppRegistration.ps1 | Done, tested in lab: `-WhatIf` and a real run (app, Assignment required, admin consent for 15 scopes, group assigned, `GraphClientId` written). A User Administrator who got "Need admin approval" through Microsoft Graph Command Line Tools then signed in through the app with no consent, and a background script signed in silently through it |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
-| Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab |
+| Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab, including the IAM console run that found `User-PasswordProfile.ReadWrite.All` rated Low (fixed in v1.6.1) |
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |
 | Reports/Get-StaleAccounts.ps1 | Done, tested in lab (needs P1). `-IncludeOnPrem` tested in hybrid lab, including a user whose AD and cloud UPNs differ |
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |

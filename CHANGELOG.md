@@ -4,6 +4,15 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-27
+
+### Fixed
+- `Get-RiskyAppPermissions.ps1` rated `User-PasswordProfile.ReadWrite.All` as Low: any permission missing from its tier list fell to Low, write scopes included. It is now Critical, with the other missing takeover paths: `DelegatedPermissionGrant.ReadWrite.All`, `Domain.ReadWrite.All`, `RoleAssignmentSchedule.ReadWrite.Directory`, `RoleEligibilitySchedule.ReadWrite.Directory`, `PrivilegedAccess.ReadWrite.AzureADGroup`. A write permission that is still not in the list is rated Medium, never Low.
+- `Get-RiskyAppPermissions.ps1`: `HasCredential` reads `Not checked` on Medium and Low rows instead of being blank, which looked like "no".
+
+### Tested in the lab
+- All five reports run from the IAM console through the own app registration.
+
 ## [1.6.0] - 2026-11-27
 
 ### Added
