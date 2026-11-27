@@ -14,6 +14,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 ### Changed
 - `Connect-IamGraph` logs which app it signed in through.
 
+### Tested in the lab
+- `New-IamAppRegistration.ps1 -OperatorGroup`: `-WhatIf`, then a real run. A User Administrator who was refused with "Need admin approval" through Microsoft Graph Command Line Tools signed in through the new app with no consent prompt, and the joiner run by the IAM console signed in silently through it.
+
 ## [1.5.4] - 2026-11-27
 
 ### Fixed
