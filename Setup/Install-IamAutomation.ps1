@@ -138,9 +138,10 @@ if ($consoleScript) {
     $shell = New-Object -ComObject WScript.Shell
     $sc = $shell.CreateShortcut($lnk)
     $sc.TargetPath = (Get-Command -Name pwsh.exe).Source
-    $sc.Arguments = "-NoProfile -File `"$consoleScript`" -AutomationPath `"$root`""
+    # -STA: WPF needs it, and the console would otherwise start itself again to get it.
+    $sc.Arguments = "-NoProfile -STA -File `"$consoleScript`" -AutomationPath `"$root`""
     $sc.WorkingDirectory = $ConsolePath
-    $sc.WindowStyle = 7   # minimised: the console window stays out of the way, start-up errors stay visible
+    $sc.WindowStyle = 1   # normal: Windows passes a minimised start on to the console's own window
     $sc.Description = 'Entra IAM Console'
     $sc.Save()
     Add-IamResult -Step 'Start menu' -Result $lnk
