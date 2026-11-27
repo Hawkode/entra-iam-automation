@@ -206,7 +206,7 @@ Until it is registered, scripts log to the file only and warn once per run. A lo
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
-| Setup/Register-IamEventSource.ps1, event log copy of every log line | Built, not run yet |
+| Setup/Register-IamEventSource.ps1, event log copy of every log line | Done, tested in lab: file only with one warning before registering, events with ID, Windows account and computer after, and a normal user refused when clearing the log |
 | Setup/New-IamAppRegistration.ps1 | Done, tested in lab: `-WhatIf` and a real run (app, Assignment required, admin consent for 15 scopes, group assigned, `GraphClientId` written). A User Administrator who got "Need admin approval" through Microsoft Graph Command Line Tools then signed in through the app with no consent, and a background script signed in silently through it |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab, including the IAM console run that found `User-PasswordProfile.ReadWrite.All` rated Low (fixed in v1.6.1) |

@@ -11,6 +11,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 - `Setup/Register-IamEventSource.ps1`: registers the source once per machine (admin), or removes it with `-Remove`.
 - `Test-IamEventSource`: whether the source is registered. It never registers it.
 
+### Tested in the lab
+- Before registering: file only, one warning per run. After `Register-IamEventSource.ps1` (elevated, once): every line as an event (ID 1000) with the Windows account and computer, written by a normal user. `wevtutil cl Application` as that user: Access is denied.
+
 ## [1.6.2] - 2026-11-27
 
 ### Fixed
