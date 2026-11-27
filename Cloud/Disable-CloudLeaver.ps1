@@ -25,8 +25,8 @@
       - Role-assignable, mail-enabled security and distribution groups, which Graph
         cannot change through this path.
 
-    Listed for a person, not changed: the user's Entra devices (retire or wipe company devices,
-    remove company data from personal ones) and the OneDrive handover to the manager.
+    Listed for a person, not changed: the user's Entra devices (retire or wipe joined devices,
+    remove company data from registered ones) and the OneDrive handover to the manager.
     Not covered, handle in your offboarding checklist: shared credentials, assets. Without -ConvertMailbox, a licensed mailbox is deleted
     30 days after the licence goes: the plan warns about it.
 

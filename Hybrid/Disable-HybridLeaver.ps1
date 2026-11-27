@@ -43,8 +43,8 @@
     Reported, not removed: active directory roles (removing them would need
     RoleManagement.ReadWrite.Directory).
 
-    Listed for a person, not changed: the user's Entra devices (retire or wipe company devices,
-    remove company data from personal ones) and the OneDrive handover to the manager. Hybrid
+    Listed for a person, not changed: the user's Entra devices (retire or wipe joined devices,
+    remove company data from registered ones) and the OneDrive handover to the manager. Hybrid
     joined devices often have no registered owner, so check the user's computer in AD as well.
 
     Graph scopes (delegated): User.ReadWrite.All, GroupMember.ReadWrite.All, RoleManagement.Read.Directory,

@@ -427,7 +427,7 @@ Describe 'Get-IamLeaverHandover' {
         Mock Invoke-IamGraphGetAll -ModuleName IamAutomation.Common -ParameterFilter { $Uri -like '*/ownedDevices/*' } -MockWith { @{ id = 'd1'; displayName = 'LAPTOP-01'; operatingSystem = 'Windows'; trustType = 'AzureAd'; approximateLastSignInDateTime = '2026-11-20T09:15:00Z' } }
         $items = @(Get-IamLeaverHandover -UserId 'u1' -HasOneDrive $false)
         $items.Count | Should -Be 2
-        $items[0] | Should -Be 'Device (remove company data, personal device): iPhone - iOS, registered, no sign-in recorded'
+        $items[0] | Should -Be 'Device (remove company data, or retire it if company-owned): iPhone - iOS, registered, no sign-in recorded'
         $items[1] | Should -Be 'Device (retire or wipe, collect the hardware): LAPTOP-01 - Windows, Entra joined, last sign-in 20 Nov 2026'
     }
 

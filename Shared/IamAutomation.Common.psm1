@@ -659,8 +659,8 @@ function Get-IamLeaverHandover {
         Manual follow-up items for a leaver's devices and OneDrive. Read-only.
     .DESCRIPTION
         Lists the Entra devices the user registered or owns (Entra joined, hybrid joined,
-        registered), each as one item: retire or wipe a company device, remove company data
-        from a personal (registered) one. Adds a OneDrive handover item for the manager when
+        registered), each as one item: retire or wipe a joined device, remove company data from
+        a registered one (usually personal, but retire it if the company owns it). Adds a OneDrive handover item for the manager when
         the user has a OneDrive. A failed device lookup becomes an item to check by hand, so
         the leaver plan never stops on it.
         Hybrid joined devices often have no registered owner and then do not show up here.
@@ -698,7 +698,7 @@ function Get-IamLeaverHandover {
             else { 'no sign-in recorded' }
             $name = if ($d.displayName) { $d.displayName } else { "device $($d.id)" }
             $os = if ($d.operatingSystem) { $d.operatingSystem } else { 'OS unknown' }
-            $action = if ("$($d.trustType)" -eq 'Workplace') { 'remove company data, personal device' } else { 'retire or wipe, collect the hardware' }
+            $action = if ("$($d.trustType)" -eq 'Workplace') { 'remove company data, or retire it if company-owned' } else { 'retire or wipe, collect the hardware' }
             $items += "Device ($action): $name - $os, $trust, $last"
         }
     }
