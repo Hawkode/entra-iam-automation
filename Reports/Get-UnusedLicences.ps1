@@ -14,8 +14,9 @@
     litigation hold or with an archive still needs one. The leavers keep it automatically
     in those cases. Check before removing.
 
-    Sign-in data (signInActivity) needs Entra ID P1 or P2. Without it the report still runs,
-    flags disabled accounts only, and says so.
+    Sign-in data (signInActivity) needs Entra ID P1 or P2, and a role that can read it: Reports
+    Reader, Global Reader or Security Reader (User Administrator cannot). Without either the
+    report still runs, flags disabled accounts only, and says why.
     Cloud sign-ins only: a user who only logs on to domain PCs can look inactive. Cross-check
     with Get-StaleAccounts -IncludeOnPrem before acting on a synced user.
 
@@ -51,15 +52,22 @@ foreach ($k in $skus) { $skuName["$($k.SkuId)"] = $k.SkuPartNumber }
 
 $props = 'Id', 'DisplayName', 'UserPrincipalName', 'AccountEnabled', 'CreatedDateTime', 'OnPremisesSyncEnabled',
 'AssignedLicenses', 'LicenseAssignmentStates'
+# -ErrorAction Stop: Get-MgUser -All reports a refused page as a non-terminating error, and the
+# report would carry on with no users.
 $noSignIn = $false
 try {
-    $users = Get-MgUser -All -Property ($props + 'SignInActivity')
+    $users = Get-MgUser -All -Property ($props + 'SignInActivity') -ErrorAction Stop
 }
 catch {
-    if ($_.Exception.Message -notmatch 'NonPremiumTenant|premium license') { throw }
-    Write-IamLog -Level WARN -Message 'No Entra ID P1 or P2: no sign-in data. Only disabled accounts are flagged.'
+    $why = switch -Regex ($_.Exception.Message) {
+        'NonPremiumTenant|premium license' { 'no Entra ID P1 or P2 in this tenant' }
+        'UnsupportedUserRole|not in the allowed roles' { 'your role cannot read sign-in data (needs Reports Reader, Global Reader or Security Reader)' }
+        default { $null }
+    }
+    if (-not $why) { throw }
+    Write-IamLog -Level WARN -Message "No sign-in data: $why. Only disabled accounts are flagged."
     $noSignIn = $true
-    $users = Get-MgUser -All -Property $props
+    $users = Get-MgUser -All -Property $props -ErrorAction Stop
 }
 
 $licensed = @($users | Where-Object { @($_.AssignedLicenses).Count -gt 0 })

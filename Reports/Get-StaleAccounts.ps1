@@ -57,11 +57,14 @@ Connect-IamGraph -TenantId $cfg.TenantId -Scopes 'User.Read.All', 'AuditLog.Read
 
 try {
     $users = Get-MgUser -All -Property Id, DisplayName, UserPrincipalName, UserType, AccountEnabled,
-    CreatedDateTime, OnPremisesSyncEnabled, OnPremisesImmutableId, SignInActivity
+    CreatedDateTime, OnPremisesSyncEnabled, OnPremisesImmutableId, SignInActivity -ErrorAction Stop
 }
 catch {
     if ($_.Exception.Message -match 'NonPremiumTenant|premium license') {
         throw 'signInActivity needs Entra ID P1 or P2 in this tenant. This report cannot run without it.'
+    }
+    if ($_.Exception.Message -match 'UnsupportedUserRole|not in the allowed roles') {
+        throw 'Your role cannot read sign-in data. Run it as Reports Reader, Global Reader or Security Reader.'
     }
     throw
 }

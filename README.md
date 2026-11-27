@@ -22,7 +22,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - Microsoft Graph PowerShell SDK: only the submodules the scripts use, all at one version. `Setup\Install-IamAutomation.ps1` installs them (step 2 below).
 - For the leavers' `-ConvertMailbox` only: ExchangeOnlineManagement (`Install-IamAutomation.ps1 -IncludeExchange`).
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
-- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. `Get-UnusedLicences` runs on Free but flags only disabled accounts without P1. PIM data in `Get-StandingAdmins` needs P2.
+- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. `Get-UnusedLicences` runs on Free but flags only disabled accounts without P1, or when run by a role that cannot read sign-in data. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
