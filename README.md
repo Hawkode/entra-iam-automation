@@ -49,6 +49,8 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
    ```
 5. Run lifecycle scripts with `-WhatIf`, then for real on a test user, then in normal use.
 
+The same steps in order, with Conditional Access, signing, upgrades and recovery: [Admin runbook](docs/ADMIN-RUNBOOK.md).
+
 **Hybrid tenants (users synced from AD DS):** use the `Hybrid/` lifecycle scripts. The `Cloud/` scripts refuse synced users by design, and the `Hybrid/` scripts refuse cloud-only users. See [Hybrid lifecycle](#hybrid-lifecycle) for the extra requirements.
 
 **Consent:** without `GraphClientId`, the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user who runs Graph PowerShell in the tenant. Scripts use delegated sign-in only: no secrets, no certificates, no application permissions.
@@ -259,7 +261,7 @@ powershell.exe -NoProfile -File .\build\Invoke-Tests.ps1
 ```
 
 ## Cheat sheet
-All commands with example values, ready to copy: [CHEATSHEET.md](CHEATSHEET.md). In a terminal, `Get-Help <script> -Examples` shows the examples for one script.
+All commands with example values, ready to copy: [CHEATSHEET.md](CHEATSHEET.md). Install order, upgrades, routine checks, recovering from a wrong run and troubleshooting: [docs/ADMIN-RUNBOOK.md](docs/ADMIN-RUNBOOK.md). In a terminal, `Get-Help <script> -Examples` shows the examples for one script.
 
 ## Versioning
 Changes are listed in [CHANGELOG.md](CHANGELOG.md). Use a tagged release, not whatever is on `main` that day, and test it before you rely on it.

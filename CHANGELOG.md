@@ -4,6 +4,9 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+### Added
+- `docs/ADMIN-RUNBOOK.md`: install order, adding and removing operators, upgrade with rollback, routine checks, recovering from a wrong run, troubleshooting from the lab, decommission.
+
 ## [1.8.0] - 2026-11-27
 
 ### Added
