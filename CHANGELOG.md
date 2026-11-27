@@ -4,6 +4,16 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-27
+
+### Added
+- `Setup/New-IamAppRegistration.ps1`: creates your own app registration for sign-in. Single tenant, public client (`http://localhost` and the Windows broker redirect URI), delegated Microsoft Graph scopes only, admin consent once for the organisation, Assignment required with the operators you name (`-OperatorGroup`, `-OperatorUpn`), then writes `GraphClientId` to `config.local.psd1` after a backup. `-WhatIf` shows the plan and creates nothing.
+- Config key `GraphClientId` (optional). When set, `Connect-IamGraph` signs in through that app instead of Microsoft Graph Command Line Tools, so operators who are not admins can sign in without consent prompts.
+- `Get-IamGraphAppScope`: every delegated scope the scripts request. A test keeps it in step with the `Connect-IamGraph` calls.
+
+### Changed
+- `Connect-IamGraph` logs which app it signed in through.
+
 ## [1.5.4] - 2026-11-27
 
 ### Fixed

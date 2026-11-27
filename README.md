@@ -13,7 +13,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | `Hybrid/` | Joiner, mover, leaver for users synced from AD DS (AD first, then Entra Connect sync, then Graph) |
 | `Reports/` | Read-only security reports, same in cloud-only and hybrid tenants |
 | `Governance/` | Access review campaigns: extract per reviewer, then apply the decisions with evidence |
-| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know |
+| `Setup/` | `New-IamConfig.ps1`: builds `config.local.psd1` from what the tenant and AD already know. `New-IamAppRegistration.ps1`: your own app registration for sign-in (recommended for teams) |
 | `Shared/` | Common module used by every script |
 | `samples/` | Example input files (fake names only) |
 
@@ -26,9 +26,9 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
-1. Get the latest tagged release, not `main`. Replace `v1.5.4` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
+1. Get the latest tagged release, not `main`. Replace `v1.6.0` with the newest tag on the Releases page. Keep the folder out of OneDrive and other synced folders (see [Output and logs](#output-and-logs)).
    ```powershell
-   git clone --branch v1.5.4 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
+   git clone --branch v1.6.0 --depth 1 https://github.com/Hawkode/entra-iam-automation.git C:\Tools\entra-iam-automation
    ```
    No Git? Download **Source code (zip)** from the release page, extract it, then run `Get-ChildItem -Recurse -File | Unblock-File` in the folder. Windows marks files from a downloaded zip as coming from the internet, and the `RemoteSigned` execution policy blocks them.
 2. Build `config.local.psd1` with the setup script. It signs in read-only, finds what Entra ID, AD and Entra Connect already know, asks only for the rest, and shows the result before it writes anything. Run it on the machine you will run the scripts from: on a domain-joined machine with RSAT it fills the hybrid keys too.
@@ -45,11 +45,18 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 
 **Hybrid tenants (users synced from AD DS):** use the `Hybrid/` lifecycle scripts. The `Cloud/` scripts refuse synced users by design, and the `Hybrid/` scripts refuse cloud-only users. See [Hybrid lifecycle](#hybrid-lifecycle) for the extra requirements.
 
-**Consent:** the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user in the tenant. Scripts use delegated sign-in only: no app registrations, no secrets.
+**Consent:** without `GraphClientId`, the first run of each script asks you to consent to *Microsoft Graph Command Line Tools* for the scopes it needs. Consent for yourself only. Do **not** tick "Consent on behalf of your organization", which grants those scopes to every user who runs Graph PowerShell in the tenant. Scripts use delegated sign-in only: no secrets, no certificates, no application permissions.
+
+**More than one operator? Use your own app registration.** A non-admin operator cannot consent to these scopes ("Need admin approval"). `Setup\New-IamAppRegistration.ps1` creates a single-tenant public client app with only the scopes these scripts use (`Get-IamGraphAppScope`), grants admin consent once, turns on **Assignment required** so only the operators you name can sign in through it, and writes `GraphClientId` to `config.local.psd1`. Every script and the IAM console then sign in through it. Aim a Conditional Access policy at the app afterwards. Needs Global Administrator or Privileged Role Administrator, once:
+```powershell
+.\Setup\New-IamAppRegistration.ps1 -OperatorGroup 'IAM Operators' -WhatIf
+.\Setup\New-IamAppRegistration.ps1 -OperatorGroup 'IAM Operators'
+```
+Assigning a group needs Entra ID P1. Without it, name the operators with `-OperatorUpn`.
 
 ### Before you run it in production
 - **Approval:** get written approval before the first run, including read-only reports. They read directory data and write it to CSV.
-- **Consent blocked?** If the consent prompt asks for admin approval, or only offers to consent for the whole organisation, stop. A tenant-wide grant is a governance decision for your tenant owners, not a setup step.
+- **Consent blocked?** If the consent prompt asks for admin approval, or only offers to consent for the whole organisation, stop. Do not grant tenant-wide consent to Microsoft Graph Command Line Tools. Ask a Global Administrator or Privileged Role Administrator to run `Setup\New-IamAppRegistration.ps1` instead: consent then covers only this tool and its assigned operators.
 - **Execution policy:** check with `Get-ExecutionPolicy -List`. If Group Policy enforces `AllSigned`, sign the scripts with your organisation's code-signing certificate rather than loosening the policy.
 - **Accounts:** run the Graph scripts with a dedicated cloud-only admin account. Hybrid scripts also need an on-prem account with delegated rights on the target OUs. Do not use Domain Admin from a workstation.
 - **Departments:** `AllowedDepartments` must match the values already in your directory exactly. List them first:
@@ -64,6 +71,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 | Key | Used by | Value |
 |---|---|---|
 | `TenantId` | All | Tenant ID (Entra admin center > Overview) |
+| `GraphClientId` | All (optional) | Application (client) ID of your own app registration (`Setup\New-IamAppRegistration.ps1`). Empty: Microsoft Graph Command Line Tools |
 | `DefaultDomain` | Joiner | Domain new UPNs are created in |
 | `UpnFormat` | Joiner | UPN prefix pattern. Tokens `{given}`, `{surname}`, `{g}`, `{s}`. Default `{given}.{surname}` |
 | `UsageLocation` | Joiner | Two-letter country code, e.g. `GB` |
@@ -189,6 +197,7 @@ Every script writes a timestamped CSV to `output/` and appends to `output/iam-au
 | Script | Status |
 |---|---|
 | Shared module | Done, tested in lab |
+| Setup/New-IamAppRegistration.ps1 | Built, not run yet |
 | Setup/New-IamConfig.ps1 | Done, tested in hybrid lab: `-WhatIf` and a real run. Every key found or suggested correctly, including the Entra Connect OU filtering read, the break-glass suggestion and the Windows PowerShell 5.1 stop. Backup and write checked, reports run with the written file |
 | Reports/Get-RiskyAppPermissions.ps1 | Done, tested in lab |
 | Reports/Get-StandingAdmins.ps1 | Done, tested in lab (PIM data needs P2) |

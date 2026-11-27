@@ -25,6 +25,16 @@ BeforeAll {
             param([string]$Method, [string]$Uri, [object]$Body, [string]$ContentType)
             throw "Invoke-MgGraphRequest reached without a mock: $Method $Uri $Body $ContentType"
         }
+        function Connect-MgGraph {
+            [CmdletBinding()]
+            param([string]$TenantId, [string[]]$Scopes, [string]$ClientId, [switch]$NoWelcome)
+            throw "Connect-MgGraph reached without a mock: $TenantId $Scopes $ClientId $NoWelcome"
+        }
+        function Get-MgContext {
+            [CmdletBinding()]
+            param()
+            throw 'Get-MgContext reached without a mock'
+        }
     } | Import-Module -Force
 
     $script:tenantId = '11111111-2222-3333-4444-555555555555'
@@ -187,6 +197,71 @@ Describe 'Import-IamConfig' {
         $err.Exception.Message | Should -Match 'TenantId must be your tenant ID'
         $err.Exception.Message | Should -Match 'Domain still has the example value'
         $err.Exception.Message | Should -Match 'UsageLocation is missing or empty'
+    }
+}
+
+Describe 'GraphClientId' {
+    BeforeAll {
+        function Write-TestConfig {
+            param([Parameter(Mandatory)][string]$Body)
+            $path = Join-Path -Path $TestDrive -ChildPath ('config-{0}.psd1' -f [guid]::NewGuid())
+            Set-Content -LiteralPath $path -Value $Body
+            $path
+        }
+        $script:appId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        Mock Assert-IamGraphHost -ModuleName IamAutomation.Common
+        Mock Write-IamLog -ModuleName IamAutomation.Common
+        Mock Connect-MgGraph -ModuleName IamAutomation.Common
+        Mock Get-MgContext -ModuleName IamAutomation.Common -MockWith { [pscustomobject]@{ TenantId = 't'; Account = 'jdoe@contoso.com'; Scopes = @('User.Read') } }
+    }
+
+    It 'accepts a config without GraphClientId' {
+        $path = Write-TestConfig -Body "@{ TenantId = '$($script:tenantId)' }"
+        { Import-IamConfig -Path $path } | Should -Not -Throw
+    }
+
+    It 'rejects a GraphClientId that is not a GUID' {
+        $path = Write-TestConfig -Body "@{ TenantId = '$($script:tenantId)'; GraphClientId = 'my-app' }"
+        $err = { Import-IamConfig -Path $path } | Should -Throw -PassThru
+        $err.Exception.Message | Should -Match 'GraphClientId must be the Application \(client\) ID'
+    }
+
+    It 'signs in through the app in the config' {
+        $null = Import-IamConfig -Path (Write-TestConfig -Body "@{ TenantId = '$($script:tenantId)'; GraphClientId = '$($script:appId)' }")
+        Connect-IamGraph -TenantId $script:tenantId -Scopes 'User.Read.All'
+        Should -Invoke Connect-MgGraph -ModuleName IamAutomation.Common -Times 1 -Exactly -ParameterFilter { $ClientId -eq $script:appId }
+    }
+
+    It 'signs in through Microsoft Graph Command Line Tools when GraphClientId is empty' {
+        $null = Import-IamConfig -Path (Write-TestConfig -Body "@{ TenantId = '$($script:tenantId)'; GraphClientId = '' }")
+        Connect-IamGraph -TenantId $script:tenantId -Scopes 'User.Read.All'
+        Should -Invoke Connect-MgGraph -ModuleName IamAutomation.Common -Times 1 -Exactly -ParameterFilter { -not $ClientId }
+    }
+
+    It 'lets -ClientId override the config' {
+        $null = Import-IamConfig -Path (Write-TestConfig -Body "@{ TenantId = '$($script:tenantId)'; GraphClientId = '$($script:appId)' }")
+        Connect-IamGraph -TenantId $script:tenantId -Scopes 'User.Read.All' -ClientId ''
+        Should -Invoke Connect-MgGraph -ModuleName IamAutomation.Common -Times 1 -Exactly -ParameterFilter { -not $ClientId }
+    }
+}
+
+Describe 'Get-IamGraphAppScope' {
+    It 'covers every scope a script asks Connect-IamGraph for' {
+        # Scopes are quoted strings on Connect-IamGraph lines or in $scopes assignments.
+        # New-IamAppRegistration.ps1 signs in through Microsoft Graph Command Line Tools, so it is left out.
+        $root = Split-Path -Path $PSScriptRoot -Parent
+        $files = Get-ChildItem -Path $root -Recurse -Filter *.ps1 | Where-Object { $_.FullName -notmatch '[\\/]tests[\\/]' -and $_.Name -ne 'New-IamAppRegistration.ps1' }
+        $asked = foreach ($f in $files) {
+            foreach ($line in (Get-Content -LiteralPath $f.FullName)) {
+                if ($line -match 'Connect-IamGraph|\$scopes\s*\+?=') {
+                    [regex]::Matches($line, "'([A-Za-z]+(-[A-Za-z]+)?\.[A-Za-z.]+)'") | ForEach-Object { $_.Groups[1].Value }
+                }
+            }
+        }
+        $asked = @($asked | Sort-Object -Unique)
+        $asked.Count | Should -BeGreaterThan 10
+        $missing = @($asked | Where-Object { (Get-IamGraphAppScope) -notcontains $_ })
+        $missing | Should -BeNullOrEmpty
     }
 }
 

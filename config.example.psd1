@@ -5,6 +5,10 @@
     # Your tenant: Entra admin center > Overview > Tenant ID.
     TenantId             = '00000000-0000-0000-0000-000000000000'
 
+    # Optional: Application (client) ID of your own app registration, made by
+    # Setup\New-IamAppRegistration.ps1. Empty: sign in through Microsoft Graph Command Line Tools.
+    GraphClientId        = ''
+
     # Domain new users are created in (joiner). Any verified domain in the tenant.
     DefaultDomain        = 'contoso.onmicrosoft.com'
 

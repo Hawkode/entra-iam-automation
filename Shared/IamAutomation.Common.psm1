@@ -3,6 +3,8 @@
 
 $script:RepoRoot = Split-Path -Path $PSScriptRoot -Parent
 
+$script:IamGraphClientId = $null   # set by Import-IamConfig from GraphClientId
+
 function Write-IamLog {
     <#
     .SYNOPSIS
@@ -29,6 +31,10 @@ function Import-IamConfig {
         A required key fails if it is missing, empty, or still holds an example value
         (anything containing "contoso"), so a half-edited copy of config.example.psd1
         never reaches a tenant.
+
+        GraphClientId is optional: the Application (client) ID of your own app registration
+        (Setup\New-IamAppRegistration.ps1). When set, Connect-IamGraph signs in through it
+        instead of Microsoft Graph Command Line Tools.
     #>
     [CmdletBinding()]
     param(
@@ -51,6 +57,14 @@ function Import-IamConfig {
         $values = @($raw | Where-Object { "$_".Trim() })
         if (-not $cfg.ContainsKey($key) -or $values.Count -eq 0) { $problems += "$key is missing or empty." }
         elseif ("$values" -match 'contoso') { $problems += "$key still has the example value from config.example.psd1." }
+    }
+    $script:IamGraphClientId = $null
+    if ("$($cfg.GraphClientId)".Trim()) {
+        $app = [guid]::Empty
+        if (-not [guid]::TryParse("$($cfg.GraphClientId)", [ref]$app) -or $app -eq [guid]::Empty) {
+            $problems += 'GraphClientId must be the Application (client) ID of your app registration, or left empty.'
+        }
+        else { $script:IamGraphClientId = "$app" }
     }
     if ($problems.Count) {
         throw ("config.local.psd1 is not ready:`n - " + ($problems -join "`n - "))
@@ -767,17 +781,46 @@ function Get-IamSyncedCloudUser {
 function Connect-IamGraph {
     <#
     .SYNOPSIS
-        Signs in to Microsoft Graph with delegated scopes and logs the tenant, account and scopes.
+        Signs in to Microsoft Graph with delegated scopes and logs the tenant, account, app and scopes.
+    .DESCRIPTION
+        Signs in through your own app registration when GraphClientId is set in config.local.psd1
+        (Import-IamConfig reads it), otherwise through Microsoft Graph Command Line Tools.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$TenantId,
-        [Parameter(Mandatory)][string[]]$Scopes
+        [Parameter(Mandatory)][string[]]$Scopes,
+        [string]$ClientId = $script:IamGraphClientId
     )
     Assert-IamGraphHost
-    Connect-MgGraph -TenantId $TenantId -Scopes $Scopes -NoWelcome -ErrorAction Stop
+    $connect = @{ TenantId = $TenantId; Scopes = $Scopes; NoWelcome = $true; ErrorAction = 'Stop' }
+    if ($ClientId) { $connect.ClientId = $ClientId }
+    Connect-MgGraph @connect
     $ctx = Get-MgContext
-    Write-IamLog -Message "Connected to $($ctx.TenantId) as $($ctx.Account). Scopes: $($ctx.Scopes -join ', ')"
+    $via = if ($ClientId) { "app $ClientId" } else { 'Microsoft Graph Command Line Tools' }
+    Write-IamLog -Message "Connected to $($ctx.TenantId) as $($ctx.Account) through $via. Scopes: $($ctx.Scopes -join ', ')"
+}
+
+function Get-IamGraphAppScope {
+    <#
+    .SYNOPSIS
+        Every delegated Graph scope the scripts in this repo request: what your own app
+        registration needs consented (Setup\New-IamAppRegistration.ps1).
+    .DESCRIPTION
+        A script signing in through your app can only use scopes the admin consented to, because
+        Assignment required stops operators consenting for themselves. A delegated scope never
+        lets the operator do more than their Entra role allows. Keep this list in step with the
+        Connect-IamGraph calls: a test checks it.
+    #>
+    [CmdletBinding()]
+    param()
+    @(
+        'User.Read', 'User.Read.All', 'User.ReadWrite.All', 'User-PasswordProfile.ReadWrite.All',
+        'UserAuthenticationMethod.ReadWrite.All', 'GroupMember.Read.All', 'GroupMember.ReadWrite.All',
+        'RoleManagement.Read.Directory', 'Directory.Read.All', 'LicenseAssignment.Read.All',
+        'AuditLog.Read.All', 'Application.Read.All', 'DelegatedPermissionGrant.Read.All',
+        'Organization.Read.All', 'Policy.Read.All'
+    )
 }
 
 function Assert-IamSyncState {
@@ -1012,7 +1055,7 @@ function Get-IamBreakGlassCandidate {
 
 Export-ModuleMember -Function Write-IamLog, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
-    Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
+    Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
     Connect-IamExchange, Get-IamMailboxState, Convert-IamMailboxToShared, Get-IamCloudManager, Test-IamExchangePlan,
     Resolve-IamDelegate, Get-IamLeaverMailboxPlan, Get-IamValidManager, Get-IamAdManager, Set-IamCloudManager,
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
