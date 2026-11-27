@@ -128,7 +128,9 @@ foreach ($m in $graphModules) {
     if ($toInstall -contains $m) {
         # -Force answers the untrusted-repository prompt for PSGallery; the version is pinned.
         Install-Module -Name $m -RequiredVersion $GraphVersion -Scope $Scope -Repository PSGallery -Force -AllowClobber
-        Add-IamResult -Step $m -Result "Installed $GraphVersion"
+        # Install-Module only warns when a module is in use by another session, so check it landed.
+        $landed = @(Get-Module -ListAvailable -Name $m | Where-Object { $_.Version -eq $GraphVersion -and (Test-IamPs7Path -Path $_.ModuleBase) })
+        Add-IamResult -Step $m -Result $(if ($landed.Count) { "Installed $GraphVersion" } else { 'NOT installed: in use by another PowerShell window. Close them all and run this again' })
     }
     else { Add-IamResult -Step $m -Result "Already $GraphVersion" }
 }

@@ -13,6 +13,7 @@ All notable changes to this project. Versions follow [Semantic Versioning](https
 
 ### Fixed (found in the lab before release)
 - Installer: counted Graph modules installed for Windows PowerShell 5.1 as present when PowerShell 7 was started from it, so the console shortcut (a pwsh started on its own) could not find them. Only PowerShell 7's own module folders count now, with a warning when started from Windows PowerShell.
+- Installer: reported a module as installed when `Install-Module` had only warned that it was in use by another session. It now checks each module landed, and says NOT installed otherwise.
 - Installer: the console shortcut opened the console minimised. It opens in a normal window now, with `-STA`.
 
 ### Changed
