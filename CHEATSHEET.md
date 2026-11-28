@@ -41,6 +41,7 @@ cd C:\Tools\entra-iam-automation
 .\Reports\Get-RiskyAppPermissions.ps1
 .\Reports\Get-ManagerCoverage.ps1
 .\Reports\Get-UnusedLicences.ps1 -InactiveDays 60
+.\Reports\Get-AppCredentialExpiry.ps1 -Days 30
 ```
 
 ## Access review (quarterly)

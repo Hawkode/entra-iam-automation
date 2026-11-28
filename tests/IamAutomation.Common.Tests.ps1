@@ -1054,3 +1054,63 @@ Describe 'Get-IamLicenceFinding' {
         $r.Licences | Should -Be 'sku-unknown'
     }
 }
+
+Describe 'Get-IamCredentialFinding' {
+    BeforeAll {
+        $script:now = [datetime]'2026-11-28T12:00:00Z'
+        function Get-TestCredential {
+            param([string]$KeyId, [string]$End, [string]$Usage, $Thumb, [string]$Name = 'cred')
+            [pscustomobject]@{ KeyId = $KeyId; DisplayName = $Name; EndDateTime = $End; Usage = $Usage; CustomKeyIdentifier = $Thumb }
+        }
+    }
+
+    It 'flags an expired secret with nothing to replace it' {
+        $app = [pscustomobject]@{ Id = 'o1'; AppId = 'a1'; DisplayName = 'Payroll sync'; KeyCredentials = @(); PasswordCredentials = @(Get-TestCredential -KeyId 'k1' -End '2026-11-10T00:00:00Z') }
+        $r = @(Get-IamCredentialFinding -Object $app -Kind 'App registration' -Now $script:now)
+        $r.Count | Should -Be 1
+        $r[0].Type | Should -Be 'Secret'
+        $r[0].Status | Should -Be 'Expired'
+        $r[0].DaysLeft | Should -Be -19
+        $r[0].Action | Should -BeLike 'Renew now*'
+    }
+
+    It 'marks an expiring certificate as replaced when a newer one is valid beyond the window' {
+        $app = [pscustomobject]@{ Id = 'o1'; AppId = 'a1'; DisplayName = 'HR feed'; PasswordCredentials = @(); KeyCredentials = @(
+                (Get-TestCredential -KeyId 'old' -End '2026-12-20T00:00:00Z' -Usage 'Verify' -Thumb 'T1')
+                (Get-TestCredential -KeyId 'new' -End '2027-12-20T00:00:00Z' -Usage 'Verify' -Thumb 'T2')
+            ) }
+        $r = @(Get-IamCredentialFinding -Object $app -Kind 'App registration' -Now $script:now -Days 60)
+        ($r | Where-Object KeyId -EQ 'old').Status | Should -Be 'Expiring, replaced'
+        ($r | Where-Object KeyId -EQ 'old').Action | Should -BeLike 'Delete the old credential*'
+        ($r | Where-Object KeyId -EQ 'new').Status | Should -Be 'OK'
+        ($r | Where-Object KeyId -EQ 'new').Action | Should -Be ''
+    }
+
+    It 'gives the renew-by date for an expiring secret' {
+        $app = [pscustomobject]@{ Id = 'o1'; AppId = 'a1'; DisplayName = 'Backup'; KeyCredentials = @(); PasswordCredentials = @(Get-TestCredential -KeyId 'k1' -End '2027-01-15T12:00:00Z') }
+        $r = Get-IamCredentialFinding -Object $app -Kind 'App registration' -Now $script:now -Days 60
+        $r.Status | Should -Be 'Expiring'
+        $r.Action | Should -BeLike 'Renew before 15 Jan 2027*'
+    }
+
+    It 'counts a SAML signing certificate (Sign, Verify and its password) as one certificate' {
+        $thumb = [byte[]](1, 2, 3, 4)
+        $sp = [pscustomobject]@{ Id = 'o2'; AppId = 'a2'; DisplayName = 'SAML Toolkit'
+            KeyCredentials      = @(
+                (Get-TestCredential -KeyId 'ks' -End '2029-11-14T00:00:00Z' -Usage 'Sign' -Thumb $thumb)
+                (Get-TestCredential -KeyId 'kv' -End '2029-11-14T00:00:00Z' -Usage 'Verify' -Thumb $thumb)
+            )
+            PasswordCredentials = @(Get-TestCredential -KeyId 'kp' -End '2029-11-14T00:00:00Z' -Thumb $thumb)
+        }
+        $r = @(Get-IamCredentialFinding -Object $sp -Kind 'Enterprise app' -Now $script:now)
+        $r.Count | Should -Be 1
+        $r[0].Type | Should -Be 'Certificate'
+        $r[0].Usage | Should -Be 'Sign, Verify'
+        $r[0].Status | Should -Be 'OK'
+    }
+
+    It 'returns nothing for an object without credentials' {
+        $app = [pscustomobject]@{ Id = 'o3'; AppId = 'a3'; DisplayName = 'Empty'; KeyCredentials = $null; PasswordCredentials = $null }
+        @(Get-IamCredentialFinding -Object $app -Kind 'App registration' -Now $script:now).Count | Should -Be 0
+    }
+}

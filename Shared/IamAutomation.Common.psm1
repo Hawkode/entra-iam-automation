@@ -1251,6 +1251,84 @@ function Get-IamLicenceFinding {
     }
 }
 
+function Get-IamCredentialFinding {
+    <#
+    .SYNOPSIS
+        One row per secret or certificate on an app registration or enterprise app, with days
+        left and a status: Expired, Expiring, OK, or "replaced" when a newer one of the same
+        type is valid beyond the warning window (then the old one only needs deleting).
+    .DESCRIPTION
+        Pass an application or service principal with PasswordCredentials and KeyCredentials.
+        A SAML signing certificate shows up on the service principal as two keys (Sign and
+        Verify) plus a password with the same key identifier: those count as one certificate.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Object,
+        [Parameter(Mandatory)][ValidateSet('App registration', 'Enterprise app')][string]$Kind,
+        [Parameter(Mandatory)][datetime]$Now,
+        [int]$Days = 60
+    )
+    function Get-KeyIdText($Credential) {
+        $c = $Credential.CustomKeyIdentifier
+        if ($c -is [byte[]] -and $c.Length) { return [Convert]::ToBase64String($c) }
+        if ($c) { return "$c" }
+        "$($Credential.KeyId)"
+    }
+
+    $creds = @()
+    $certIds = @{}
+    foreach ($group in (@($Object.KeyCredentials | Where-Object { $_ }) | Group-Object -Property { (Get-KeyIdText $_) + '|' + "$($_.EndDateTime)" })) {
+        $first = $group.Group[0]
+        $certIds[(Get-KeyIdText $first)] = $true
+        $creds += [pscustomobject]@{
+            Type  = 'Certificate'
+            Name  = $first.DisplayName
+            KeyId = "$($first.KeyId)"
+            Usage = (@($group.Group | ForEach-Object { $_.Usage } | Where-Object { $_ } | Sort-Object -Unique) -join ', ')
+            End   = [datetime]$first.EndDateTime
+        }
+    }
+    foreach ($p in @($Object.PasswordCredentials | Where-Object { $_ })) {
+        # The password half of a SAML signing certificate.
+        if ($Kind -eq 'Enterprise app' -and $certIds.ContainsKey((Get-KeyIdText $p))) { continue }
+        $creds += [pscustomobject]@{
+            Type  = 'Secret'
+            Name  = $p.DisplayName
+            KeyId = "$($p.KeyId)"
+            Usage = ''
+            End   = [datetime]$p.EndDateTime
+        }
+    }
+
+    $window = $Now.AddDays($Days)
+    foreach ($c in $creds) {
+        $daysLeft = [int][math]::Floor(($c.End - $Now).TotalDays)
+        $replaced = [bool](@($creds | Where-Object { $_.Type -eq $c.Type -and $_.KeyId -ne $c.KeyId -and $_.End -gt $window }).Count)
+        $status = if ($c.End -lt $Now) { 'Expired' } elseif ($c.End -le $window) { 'Expiring' } else { 'OK' }
+        $action = switch ($status) {
+            'Expired' { if ($replaced) { 'Delete the old credential' } else { 'Renew now if the app is still used, then delete the old one' } }
+            'Expiring' { if ($replaced) { 'Delete the old credential once the new one is in use' } else { "Renew before $($c.End.ToString('dd MMM yyyy', [cultureinfo]::InvariantCulture)) and update whatever uses it" } }
+            default { '' }
+        }
+        if ($replaced -and $status -ne 'OK') { $status += ', replaced' }
+        [pscustomobject]@{
+            Kind        = $Kind
+            DisplayName = $Object.DisplayName
+            AppId       = $Object.AppId
+            ObjectId    = $Object.Id
+            Type        = $c.Type
+            Name        = $c.Name
+            KeyId       = $c.KeyId
+            Usage       = $c.Usage
+            EndDate     = $c.End
+            DaysLeft    = $daysLeft
+            Status      = $status
+            Action      = $action
+        }
+    }
+}
+
 Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
@@ -1260,4 +1338,4 @@ Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfi
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
     Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap,
     ConvertTo-IamConfigText, Test-IamOuInSyncScope, ConvertFrom-IamMsolDescription, Get-IamUpnFormatGuess,
-    Get-IamBreakGlassCandidate, Get-IamLicenceFinding
+    Get-IamBreakGlassCandidate, Get-IamLicenceFinding, Get-IamCredentialFinding
