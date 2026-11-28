@@ -1114,3 +1114,68 @@ Describe 'Get-IamCredentialFinding' {
         @(Get-IamCredentialFinding -Object $app -Kind 'App registration' -Now $script:now).Count | Should -Be 0
     }
 }
+
+Describe 'Get-IamGroupOwnerFinding' {
+    BeforeAll {
+        function Get-TestOwner {
+            param([string]$Upn, [bool]$Enabled = $true, [switch]$App)
+            if ($App) { return @{ '@odata.type' = '#microsoft.graph.servicePrincipal'; id = 'sp1'; displayName = 'Sync app' } }
+            @{ '@odata.type' = '#microsoft.graph.user'; id = $Upn; displayName = $Upn; userPrincipalName = $Upn; accountEnabled = $Enabled }
+        }
+        function Get-TestGroup {
+            param($Owners = @(), [string[]]$GroupTypes = @(), [bool]$Mail = $false, [bool]$Security = $true, $Synced = $null, [bool]$Role = $false)
+            @{ id = 'g1'; displayName = 'Finance'; groupTypes = $GroupTypes; mailEnabled = $Mail; securityEnabled = $Security
+                onPremisesSyncEnabled = $Synced; isAssignableToRole = $Role; owners = $Owners }
+        }
+    }
+
+    It 'flags a group nobody owns' {
+        $r = Get-IamGroupOwnerFinding -Group (Get-TestGroup)
+        $r.Finding | Should -Be 'No owner'
+        $r.Type | Should -Be 'Security'
+        $r.Membership | Should -Be 'Assigned'
+    }
+
+    It 'treats an app as no owner' {
+        $r = Get-IamGroupOwnerFinding -Group (Get-TestGroup -Owners @(Get-TestOwner -App))
+        $r.Finding | Should -Be 'No owner'
+        $r.Owners | Should -Be 'Sync app (app)'
+    }
+
+    It 'flags a group whose owners have all left, and names them' {
+        $r = Get-IamGroupOwnerFinding -Group (Get-TestGroup -Owners @(Get-TestOwner -Upn 'left@contoso.com' -Enabled $false))
+        $r.Finding | Should -Be 'Only disabled owners'
+        $r.Action | Should -Be 'Replace the disabled owner(s): left@contoso.com'
+        $r.Owners | Should -Be 'left@contoso.com (disabled)'
+    }
+
+    It 'flags a single owner by default, and not with -MinOwners 1' {
+        $g = Get-TestGroup -Owners @(Get-TestOwner -Upn 'jdoe@contoso.com')
+        (Get-IamGroupOwnerFinding -Group $g).Finding | Should -Be 'Single owner'
+        (Get-IamGroupOwnerFinding -Group $g -MinOwners 1).Finding | Should -Be ''
+    }
+
+    It 'counts only enabled users as working owners' {
+        $g = Get-TestGroup -Owners @((Get-TestOwner -Upn 'a@contoso.com'), (Get-TestOwner -Upn 'b@contoso.com' -Enabled $false), (Get-TestOwner -App))
+        $r = Get-IamGroupOwnerFinding -Group $g
+        $r.EnabledOwners | Should -Be 1
+        $r.Finding | Should -Be 'Single owner'
+    }
+
+    It 'passes a group with two working owners' {
+        $g = Get-TestGroup -GroupTypes 'Unified', 'DynamicMembership' -Mail $true -Owners @((Get-TestOwner -Upn 'a@contoso.com'), (Get-TestOwner -Upn 'b@contoso.com'))
+        $r = Get-IamGroupOwnerFinding -Group $g
+        $r.Finding | Should -Be ''
+        $r.Type | Should -Be 'Microsoft 365'
+        $r.Membership | Should -Be 'Dynamic'
+    }
+
+    It 'labels synced groups and distribution lists without flagging them' {
+        (Get-IamGroupOwnerFinding -Group (Get-TestGroup -Synced $true)).Finding | Should -Be 'Synced from AD'
+        (Get-IamGroupOwnerFinding -Group (Get-TestGroup -Mail $true -Security $false)).Finding | Should -Be 'Distribution list'
+    }
+
+    It 'marks role-assignable groups' {
+        (Get-IamGroupOwnerFinding -Group (Get-TestGroup -Role $true)).RoleAssignable | Should -BeTrue
+    }
+}

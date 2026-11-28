@@ -42,6 +42,7 @@ cd C:\Tools\entra-iam-automation
 .\Reports\Get-ManagerCoverage.ps1
 .\Reports\Get-UnusedLicences.ps1 -InactiveDays 60
 .\Reports\Get-AppCredentialExpiry.ps1 -Days 30
+.\Reports\Get-GroupOwnerCoverage.ps1 -MinOwners 2
 ```
 
 ## Access review (quarterly)

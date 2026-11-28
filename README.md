@@ -22,7 +22,7 @@ Companion to [IAM Lab in Microsoft Entra ID](https://hawkode.github.io/projects/
 - Microsoft Graph PowerShell SDK: only the submodules the scripts use, all at one version. `Setup\Install-IamAutomation.ps1` installs them (step 2 below).
 - For the leavers' `-ConvertMailbox` only: ExchangeOnlineManagement (`Install-IamAutomation.ps1 -IncludeExchange`).
 - An admin account with the Entra role each script needs (User Administrator for the lifecycle scripts).
-- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-AppCredentialExpiry`, `Get-ManagerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. `Get-UnusedLicences` runs on Free but flags only disabled accounts without P1, or when run by a role that cannot read sign-in data. PIM data in `Get-StandingAdmins` needs P2.
+- Licences: lifecycle scripts, `Get-RiskyAppPermissions`, `Get-AppCredentialExpiry`, `Get-ManagerCoverage`, `Get-GroupOwnerCoverage` and the access review scripts work on Entra ID Free (`-IncludeSignIn` needs P1). `Get-StaleAccounts` and `Get-MfaRegistration` need P1. `Get-UnusedLicences` runs on Free but flags only disabled accounts without P1, or when run by a role that cannot read sign-in data. PIM data in `Get-StandingAdmins` needs P2.
 - **Design requirement for the mover and leaver:** access is granted through dynamic groups keyed on the `department` attribute (dynamic groups need P1). Without that design the scripts still run, but changing the department moves no access.
 
 ## Use it in your own tenant
@@ -165,6 +165,7 @@ The same applies to the mover: if a department OU is outside the scope, moving a
 | `Get-ManagerCoverage.ps1` | Enabled users with no manager or a disabled manager. The leavers' mailbox handover depends on it | `User.Read.All` | Free |
 | `Get-UnusedLicences.ps1` | Licences on disabled accounts and on enabled accounts with no sign-in for `-InactiveDays` (default `StaleDays`), direct or group-assigned, with a summary per licence: unused and free | `User.Read.All`, `AuditLog.Read.All`, `LicenseAssignment.Read.All` | Free for disabled accounts, P1 for inactive |
 | `Get-AppCredentialExpiry.ps1` | Secrets and certificates on app registrations and enterprise apps (SAML signing certificates included) that expired or expire within `-Days` (default 60), with the owners to ask, and old ones already replaced by a newer credential | `Application.Read.All` | Free |
+| `Get-GroupOwnerCoverage.ps1` | Cloud groups with no owner, only disabled owners, or fewer than `-MinOwners` (default 2), with member counts for flagged groups and role-assignable groups first. Access reviews depend on owners | `GroupMember.Read.All`, `User.Read.All` | Free |
 
 ## Access reviews
 A quarterly recertification without Entra ID P2: each group owner gets a CSV of who is in their groups, marks each row Keep or Revoke, and sends it back. The second script checks the returned files and applies the decisions.
@@ -244,7 +245,8 @@ $cert.Thumbprint
 | Reports/Get-MfaRegistration.ps1 | Done, tested in lab |
 | Reports/Get-ManagerCoverage.ps1 | Done, tested in lab |
 | Reports/Get-UnusedLicences.ps1 | Done, tested in lab: as Global Administrator (disabled, inactive, break-glass, group and direct assignment, summary per licence) and as User Administrator (no sign-in data: warning, disabled accounts only). Found the silent 403 in `Get-StaleAccounts` too (fixed) |
-| Reports/Get-AppCredentialExpiry.ps1 | Built, unit tests only, lab test next |
+| Reports/Get-AppCredentialExpiry.ps1 | Done, tested in lab: expiring secret marked as replaced by a newer one, SAML signing certificate counted once, Entra Connect's own certificate found |
+| Reports/Get-GroupOwnerCoverage.ps1 | Built, unit tests only, lab test next |
 | Governance/Get-AccessReviewExtract.ps1 | Done, tested in lab (`-GroupName`, owner, fallback reviewer, department, disabled and self-review flags). `-AllAssignedGroups` and `-IncludeSignIn` untested |
 | Governance/Invoke-AccessReviewDecisions.ps1 | Done, tested in lab (validation refusal, `-StatusOnly`, `-WhatIf`, removal, evidence, a returned file in Excel's CSV format: no quotes, TRUE/FALSE, ANSI without BOM, CRLF). A file saved by Excel itself untested (no Excel licence in the lab) |
 | Cloud/New-CloudJoiner.ps1 | Done, tested in lab (single user, CSV, manager) |

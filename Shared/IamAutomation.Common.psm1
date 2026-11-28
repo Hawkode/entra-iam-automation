@@ -1329,6 +1329,78 @@ function Get-IamCredentialFinding {
     }
 }
 
+function Get-IamGroupOwnerFinding {
+    <#
+    .SYNOPSIS
+        One report row for a group: type, source, owners, and whether it lacks a working
+        human owner (No owner, Only disabled owners, Single owner).
+    .DESCRIPTION
+        Pass a group as returned by Graph (hashtable or object) with groupTypes, mailEnabled,
+        securityEnabled, onPremisesSyncEnabled, isAssignableToRole and owners expanded with
+        id, displayName, userPrincipalName, accountEnabled and @odata.type.
+        Only enabled users count as working owners: an app (service principal) cannot answer
+        an access review. Groups synced from AD and distribution lists are labelled, not
+        flagged: their owners are managed in AD (managedBy) or Exchange.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Group,
+        [ValidateRange(1, 5)][int]$MinOwners = 2
+    )
+    $types = @($Group.groupTypes)
+    $type = if ($types -contains 'Unified') { 'Microsoft 365' }
+    elseif ($Group.mailEnabled -and $Group.securityEnabled) { 'Mail-enabled security' }
+    elseif ($Group.mailEnabled) { 'Distribution' }
+    else { 'Security' }
+    $membership = if ($types -contains 'DynamicMembership') { 'Dynamic' } else { 'Assigned' }
+    $source = if ($Group.onPremisesSyncEnabled) { 'AD' } else { 'Cloud' }
+
+    $owners = @($Group.owners | Where-Object { $_ })
+    $users = @($owners | Where-Object { "$($_.'@odata.type')" -eq '#microsoft.graph.user' })
+    $enabled = @($users | Where-Object { $_.accountEnabled })
+    $disabled = @($users | Where-Object { -not $_.accountEnabled })
+    $names = @($owners | ForEach-Object {
+            $n = if ($_.userPrincipalName) { $_.userPrincipalName } else { "$($_.displayName) (app)" }
+            if ("$($_.'@odata.type')" -eq '#microsoft.graph.user' -and -not $_.accountEnabled) { "$n (disabled)" } else { $n }
+        })
+
+    $finding = ''
+    $action = ''
+    if ($source -eq 'AD') {
+        $finding = 'Synced from AD'
+        $action = 'Owner is managed in AD (managedBy), not here'
+    }
+    elseif ($type -eq 'Distribution') {
+        $finding = 'Distribution list'
+        $action = 'Owner is managed in Exchange (ManagedBy)'
+    }
+    elseif (-not $users.Count) {
+        $finding = 'No owner'
+        $action = 'Add two owners from the team that uses it, or delete it if nobody does'
+    }
+    elseif (-not $enabled.Count) {
+        $finding = 'Only disabled owners'
+        $action = 'Replace the disabled owner(s): ' + (($disabled | ForEach-Object { $_.userPrincipalName }) -join '; ')
+    }
+    elseif ($enabled.Count -lt $MinOwners) {
+        $finding = if ($enabled.Count -eq 1) { 'Single owner' } else { "Only $($enabled.Count) owners" }
+        $action = "Add owners until there are $MinOwners"
+    }
+
+    [pscustomobject]@{
+        DisplayName    = $Group.displayName
+        Id             = $Group.id
+        Type           = $type
+        Membership     = $membership
+        Source         = $source
+        RoleAssignable = [bool]$Group.isAssignableToRole
+        Owners         = ($names -join '; ')
+        EnabledOwners  = $enabled.Count
+        Finding        = $finding
+        Action         = $action
+    }
+}
+
 Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfig, Get-IamOutputPath, Get-IamUpnPrefix, Get-IamRandomPassword,
     ConvertTo-IamSecureString, Import-IamAdModule, Invoke-IamDeltaSync, Wait-IamCloudUser, Connect-IamGraph,
     Get-IamGraphAppScope, Assert-IamSyncState, Revoke-IamUserSession, Remove-IamUserLicense, Get-IamUserAuthMethod, Remove-IamUserAuthMethod,
@@ -1338,4 +1410,4 @@ Export-ModuleMember -Function Write-IamLog, Test-IamEventSource, Import-IamConfi
     Write-IamManagerWarning, Get-IamOutputFolder, Export-IamCsv, Invoke-IamGraphGetAll, Assert-IamGraphHost,
     Assert-IamVerifiedDomain, ConvertTo-IamImmutableId, Get-IamSyncedCloudUser, ConvertTo-IamAdAnchorMap,
     ConvertTo-IamConfigText, Test-IamOuInSyncScope, ConvertFrom-IamMsolDescription, Get-IamUpnFormatGuess,
-    Get-IamBreakGlassCandidate, Get-IamLicenceFinding, Get-IamCredentialFinding
+    Get-IamBreakGlassCandidate, Get-IamLicenceFinding, Get-IamCredentialFinding, Get-IamGroupOwnerFinding
