@@ -1269,11 +1269,11 @@ function Get-IamCredentialFinding {
         [Parameter(Mandatory)][datetime]$Now,
         [int]$Days = 60
     )
-    function Get-KeyIdText($Credential) {
-        $c = $Credential.CustomKeyIdentifier
+    function Get-KeyIdText($Item) {
+        $c = $Item.CustomKeyIdentifier
         if ($c -is [byte[]] -and $c.Length) { return [Convert]::ToBase64String($c) }
         if ($c) { return "$c" }
-        "$($Credential.KeyId)"
+        "$($Item.KeyId)"
     }
 
     $creds = @()
